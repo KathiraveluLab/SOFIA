@@ -7,6 +7,10 @@ SOFIA is a lightweight, Erlang-based framework designed for building scalable, f
 - **Federated Service Registry (`sofia_registry`)**: Fully decentralized service registration and discovery using Erlang process groups (`pg`).
 - **Stateful Circuit Breaker (`sofia_breaker`)**: Low-latency, ETS-backed circuit breaker protecting distributed service calls from cascading failures.
 - **Federated Configuration Sync (`sofia_config`)**: Decoupled, replicated configuration settings synchronized across nodes via lightweight cluster RPCs.
+- **Protocol Gateway (`sofia_gateway`)**: Dynamic protocol bridging translating external sensor/web requests (e.g. JSON maps) into native message tuples.
+- **Content-Based Router (`sofia_router`)**: Dynamic routing of service requests to specific target Pids based on payload criteria.
+- **Data Transformer (`sofia_transformer`)**: Schema mapping and normalization of message parameters directly in client context.
+- **Saga Orchestrator (`sofia_saga`)**: Fault-tolerant distributed transaction coordinator executing rollbacks in reverse order on failure.
 - **Zero Bloat**: No centralized broker, no complex workflow orchestration engines, and no SOAP/XML overhead.
 
 ## Building and Compiling
@@ -19,9 +23,16 @@ rebar3 compile
 
 ## Running Unit Tests
 
-SOFIA utilizes EUnit to validate its core modules (service registry, circuit breaker transitions, and distributed configuration sync). Run the test suite using:
+SOFIA utilizes EUnit to validate its core modules. Run the test suite using:
 
 ```bash
 rebar3 eunit
 ```
+
+## Guides and Documentation
+
+For complete walkthroughs and domain integrations, see:
+- **[Tutorial Guide (Tutorial.md)](Tutorial.md)**: Detailed step-by-step instructions on setting up local multi-node clusters, registering services, and executing Saga rollbacks.
+- **[Verifiable Use Cases (Usecases.md)](Usecases.md)**: Real-world templates for water quality monitoring, industrial carbon tracking, and clinic referrals using SOFIA.
+
 

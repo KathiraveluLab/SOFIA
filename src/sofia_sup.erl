@@ -49,6 +49,30 @@ init([]) ->
             start => {sofia_config, start_link, []},
             restart => permanent,
             type => worker
+        },
+        #{
+            id => sofia_gateway,
+            start => {sofia_gateway, start_link, []},
+            restart => permanent,
+            type => worker
+        },
+        #{
+            id => sofia_router,
+            start => {sofia_router, start_link, []},
+            restart => permanent,
+            type => worker
+        },
+        #{
+            id => sofia_transformer,
+            start => {sofia_transformer, start_link, []},
+            restart => permanent,
+            type => worker
+        },
+        #{
+            id => sofia_saga,
+            start => {sofia_saga, start_link, []},
+            restart => permanent,
+            type => worker
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

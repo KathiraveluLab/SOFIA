@@ -1,14 +1,13 @@
--module(sofia_registry).
+-module(sofia_router).
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, register_service/2, deregister_service/2, discover/1, discover_all/1]).
+-export([start_link/0, route/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(SCOPE, sofia_pg_scope).
 
 -record(state, {}).
 
@@ -19,39 +18,27 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-register_service(ServiceType, Pid) ->
-    gen_server:call(?SERVER, {register, ServiceType, Pid}).
-
-deregister_service(ServiceType, Pid) ->
-    gen_server:call(?SERVER, {deregister, ServiceType, Pid}).
-discover(ServiceType) ->
-    case discover_all(ServiceType) of
+%% Dynamically route payload to a specific service instance using a custom routing/criteria function
+route(ServiceType, Payload, RoutingKeyFun) ->
+    case sofia_registry:discover_all(ServiceType) of
         [] ->
             {error, no_service_available};
         Pids ->
-            Idx = rand:uniform(length(Pids)),
-            {ok, lists:nth(Idx, Pids)}
+            %% Apply the dynamic routing criteria to choose a specific Pid
+            case RoutingKeyFun(Payload, Pids) of
+                {ok, SelectedPid} ->
+                    {ok, SelectedPid};
+                {error, Reason} ->
+                    {error, {routing_failed, Reason}}
+            end
     end.
-
-discover_all(ServiceType) ->
-    pg:get_members(?SCOPE, ServiceType).
 
 %% ===================================================================
 %% gen_server callbacks
 %% ===================================================================
 
 init([]) ->
-    %% Start the local pg scope for federated service discovery
-    {ok, _PgPid} = pg:start_link(?SCOPE),
     {ok, #state{}}.
-
-handle_call({register, ServiceType, Pid}, _From, State) ->
-    ok = pg:join(?SCOPE, ServiceType, Pid),
-    {reply, ok, State};
-
-handle_call({deregister, ServiceType, Pid}, _From, State) ->
-    _ = pg:leave(?SCOPE, ServiceType, Pid),
-    {reply, ok, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.

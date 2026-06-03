@@ -20,7 +20,8 @@ sofia_full_test_() ->
       fun test_scatter_gather/0,
       fun test_roa/0,
       fun test_multitenant/0,
-      fun test_sfc/0
+      fun test_sfc/0,
+      fun test_workflow/0
      ]}.
 
 setup() ->
@@ -548,3 +549,99 @@ test_sfc() ->
     ok = sofia_registry:deregister_service(auth_step, AuthPid),
     ok = sofia_registry:deregister_service(validate_step, ValidatePid),
     ok = sofia_registry:deregister_service(log_step, LogPid).
+
+test_workflow() ->
+    %% YAML specification representing a directed hypergraph where auth fays out to validate and notify
+    Yaml = "
+name: hypergraph_workflow
+- source: auth_node
+  destinations:
+    - validate_node
+    - notify_node
+- source: validate_node
+  destinations:
+    - billing_node
+",
+    {ok, Workflow} = sofia_workflow:parse_yaml(Yaml),
+    ?assertEqual("hypergraph_workflow", maps:get(name, Workflow)),
+    
+    Edges = maps:get(edges, Workflow),
+    ?assertEqual([validate_node, notify_node], maps:get(auth_node, Edges)),
+    ?assertEqual([billing_node], maps:get(validate_node, Edges)),
+    
+    Self = self(),
+    
+    %% Spawn actor loops for each node in the hypergraph
+    AuthPid = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [auth], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ValidatePid = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [valid], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    NotifyPid = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [notified], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    BillingPid = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [billed], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(auth_node, AuthPid),
+    ok = sofia_registry:register_service(validate_node, ValidatePid),
+    ok = sofia_registry:register_service(notify_node, NotifyPid),
+    ok = sofia_registry:register_service(billing_node, BillingPid),
+    
+    timer:sleep(50),
+    
+    %% Start workflow at auth_node
+    ok = sofia_workflow:execute(Workflow, auth_node, [start], Self),
+    
+    %% We expect two leaf nodes to finish: notify_node and billing_node
+    %% billing_node will receive state from auth_node and validate_node -> [start, auth, valid, billed]
+    %% notify_node will receive state from auth_node -> [start, auth, notified]
+    
+    Results = collect_wf_results(2, []),
+    ?assertEqual(2, length(Results)),
+    ?assert(lists:member({notify_node, [start, auth, notified]}, Results)),
+    ?assert(lists:member({billing_node, [start, auth, valid, billed]}, Results)),
+    
+    %% Clean up
+    AuthPid ! stop,
+    ValidatePid ! stop,
+    NotifyPid ! stop,
+    BillingPid ! stop,
+    ok = sofia_registry:deregister_service(auth_node, AuthPid),
+    ok = sofia_registry:deregister_service(validate_node, ValidatePid),
+    ok = sofia_registry:deregister_service(notify_node, NotifyPid),
+    ok = sofia_registry:deregister_service(billing_node, BillingPid).
+
+collect_wf_results(0, Acc) -> Acc;
+collect_wf_results(N, Acc) ->
+    receive
+        {workflow_branch_complete, Node, Payload, _Ref} ->
+            collect_wf_results(N - 1, [{Node, Payload} | Acc])
+    after 1000 ->
+        Acc
+    end.

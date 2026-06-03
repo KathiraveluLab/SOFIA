@@ -18,3 +18,6 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
 
 5. **[Chapter 5: Advanced Federation Patterns](05_advanced_federation_patterns.md)**
    Understand service-level multitenancy isolation with fallback routing, and decentralized service function chaining (SFC).
+
+6. **[Chapter 6: Hypergraph Service Workflows](06_hypergraph_service_workflows.md)**
+   Define, parse, and execute service workflows in the form of directed hypergraphs using YAML notation.

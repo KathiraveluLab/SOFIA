@@ -16,7 +16,9 @@ sofia_full_test_() ->
       fun test_skeleton_and_stub/0,
       fun test_healthcare_finance_interconnection/0,
       fun test_pubsub/0,
-      fun test_pipeline/0
+      fun test_pipeline/0,
+      fun test_scatter_gather/0,
+      fun test_roa/0
      ]}.
 
 setup() ->
@@ -373,3 +375,96 @@ collect_pipeline_results(N, Acc) ->
     after 200 ->
         Acc
     end.
+
+test_scatter_gather() ->
+    %% Start 3 mock nodes that respond to scatter request with different prices/estimates
+    Mock1 = spawn(fun() ->
+        receive
+            {scatter, Ref, From, {get_quote, Item}} ->
+                From ! {gather, Ref, {mock1, Item, 100}}
+        end
+    end),
+    Mock2 = spawn(fun() ->
+        receive
+            {scatter, Ref, From, {get_quote, Item}} ->
+                From ! {gather, Ref, {mock2, Item, 120}}
+        end
+    end),
+    Mock3 = spawn(fun() ->
+        receive
+            {scatter, Ref, From, {get_quote, Item}} ->
+                From ! {gather, Ref, {mock3, Item, 110}}
+        end
+    end),
+
+    ok = sofia_registry:register_service(quote_provider, Mock1),
+    ok = sofia_registry:register_service(quote_provider, Mock2),
+    ok = sofia_registry:register_service(quote_provider, Mock3),
+
+    timer:sleep(50),
+
+    %% Invoke scatter gather
+    {ok, Replies} = sofia_scatter_gather:request(quote_provider, {get_quote, <<"widget">>}, 1000),
+    
+    %% Verify we received responses from all 3 providers
+    ?assertEqual(3, length(Replies)),
+    ?assert(lists:member({mock1, <<"widget">>, 100}, Replies)),
+    ?assert(lists:member({mock2, <<"widget">>, 120}, Replies)),
+    ?assert(lists:member({mock3, <<"widget">>, 110}, Replies)),
+
+    %% Verify error returned when no providers are available
+    ?assertEqual({error, no_service_available}, sofia_scatter_gather:request(non_existent_provider, {get_quote, <<"widget">>}, 1000)),
+
+    %% Clean up registry
+    ok = sofia_registry:deregister_service(quote_provider, Mock1),
+    ok = sofia_registry:deregister_service(quote_provider, Mock2),
+    ok = sofia_registry:deregister_service(quote_provider, Mock3).
+
+test_roa() ->
+    %% Start a mock resource actor representing a patient resource "/patients/101"
+    Loop = fun L(State) ->
+        receive
+            {roa_request, Ref, From, get} ->
+                From ! {roa_response, Ref, {ok, State}},
+                L(State);
+            {roa_request, Ref, From, {put, NewState}} ->
+                From ! {roa_response, Ref, {ok, NewState}},
+                L(NewState);
+            {roa_request, Ref, From, {post, Data}} ->
+                NewState = State ++ [Data],
+                From ! {roa_response, Ref, {ok, NewState}},
+                L(NewState);
+            {roa_request, Ref, From, delete} ->
+                From ! {roa_response, Ref, {ok, deleted}},
+                ok;
+            stop ->
+                ok
+        end
+    end,
+    
+    ResourcePid = spawn(fun() -> Loop([]) end),
+    ok = sofia_roa:register_resource("/patients/101", ResourcePid),
+    
+    timer:sleep(50),
+    
+    %% Verify GET returns empty state
+    ?assertEqual({ok, []}, sofia_roa:get("/patients/101")),
+    
+    %% Verify PUT modifies state
+    ?assertEqual({ok, ["John Doe"]}, sofia_roa:put("/patients/101", ["John Doe"])),
+    ?assertEqual({ok, ["John Doe"]}, sofia_roa:get("/patients/101")),
+    
+    %% Verify POST appends to state
+    ?assertEqual({ok, ["John Doe", "Active"]}, sofia_roa:post("/patients/101", "Active")),
+    ?assertEqual({ok, ["John Doe", "Active"]}, sofia_roa:get("/patients/101")),
+    
+    %% Verify DELETE terminates resource
+    ?assertEqual({ok, deleted}, sofia_roa:delete("/patients/101")),
+    
+    timer:sleep(50),
+    
+    %% Verify discovery fails now
+    ?assertEqual({error, no_service_available}, sofia_roa:get("/patients/101")),
+    
+    %% Clean up (deregister)
+    ok = sofia_roa:deregister_resource("/patients/101", ResourcePid).

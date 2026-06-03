@@ -79,7 +79,26 @@ test_config() ->
     
     %% Local updates via set_local work
     ?assertEqual(ok, sofia_config:set_local(my_key2, 42)),
-    ?assertEqual(42, sofia_config:get(my_key2)).
+    ?assertEqual(42, sofia_config:get(my_key2)),
+    
+    %% Test LWW behavior
+    %% 1. Initial write
+    ?assertEqual(ok, sofia_config:set_local(lww_key, "val1", 100, node_a)),
+    ?assertEqual("val1", sofia_config:get(lww_key)),
+    
+    %% 2. Stale write (smaller timestamp) should be ignored
+    ?assertEqual(ok, sofia_config:set_local(lww_key, "val2", 50, node_b)),
+    ?assertEqual("val1", sofia_config:get(lww_key)),
+    
+    %% 3. Future write (larger timestamp) should overwrite
+    ?assertEqual(ok, sofia_config:set_local(lww_key, "val3", 150, node_c)),
+    ?assertEqual("val3", sofia_config:get(lww_key)),
+    
+    %% 4. Equal timestamp: Node name tie-breaker (node_z > node_c alphabetically)
+    ?assertEqual(ok, sofia_config:set_local(lww_key, "val4", 150, node_a)), %% smaller node name, ignored
+    ?assertEqual("val3", sofia_config:get(lww_key)),
+    ?assertEqual(ok, sofia_config:set_local(lww_key, "val5", 150, node_z)), %% larger node name, overwrites
+    ?assertEqual("val5", sofia_config:get(lww_key)).
 
 test_contracts() ->
     Contract = #{

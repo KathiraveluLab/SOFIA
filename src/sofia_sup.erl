@@ -73,6 +73,12 @@ init([]) ->
             start => {sofia_saga, start_link, []},
             restart => permanent,
             type => worker
+        },
+        #{
+            id => sofia_tracer,
+            start => {sofia_tracer, start_link, []},
+            restart => permanent,
+            type => worker
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

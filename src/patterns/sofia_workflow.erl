@@ -45,12 +45,14 @@ parse_destinations([Line | Rest] = All, Acc) ->
             {lists:reverse(Acc), All}
     end.
 
-%% @doc Triggers the execution of a workflow at a specific start node.
 execute(Workflow, StartNode, Payload, Originator) ->
-    forward_step(Workflow, StartNode, Payload, make_ref(), Originator).
+    forward_step(Workflow, StartNode, Payload, make_ref(), Originator, undefined).
 
-forward_step(#{edges := _Edges} = Workflow, Node, Payload, Ref, Originator) ->
-    Originator ! {workflow_progress, Node, Payload, Ref},
+forward_step(Workflow, Node, Payload, Ref, Originator) ->
+    forward_step(Workflow, Node, Payload, Ref, Originator, undefined).
+
+forward_step(#{edges := _Edges} = Workflow, Node, Payload, Ref, Originator, ParentNode) ->
+    Originator ! {workflow_progress, Node, Payload, Ref, ParentNode},
     case sofia_registry:discover(Node) of
         {ok, Pid} ->
             Pid ! {workflow_step, Workflow, Node, Payload, Ref, Originator},
@@ -72,7 +74,7 @@ complete_step(#{edges := Edges} = Workflow, Node, NewPayload, Ref, Originator) -
         Dests ->
             %% Fan-out (hyperedge routing) to all destination nodes
             lists:foreach(fun(Dest) ->
-                forward_step(Workflow, Dest, NewPayload, Ref, Originator)
+                forward_step(Workflow, Dest, NewPayload, Ref, Originator, Node)
             end, Dests),
             ok
     end.

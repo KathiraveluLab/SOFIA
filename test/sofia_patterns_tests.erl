@@ -15,7 +15,8 @@ sofia_patterns_test_() ->
       fun test_workflow/0,
       fun test_orchestrator_sfc_success/0,
       fun test_orchestrator_sfc_saga/0,
-      fun test_orchestrator_workflow_success/0
+      fun test_orchestrator_workflow_success/0,
+      fun test_orchestrator_tracing/0
      ]}.
 
 setup() ->
@@ -403,7 +404,7 @@ test_orchestrator_sfc_success() ->
     timer:sleep(50),
     
     %% Run SFC with Orchestrator (default retry policy)
-    {ok, Result} = sofia_orchestrator:execute_sfc([auth_step, validate_step], [start], #{}),
+    {ok, Result, _TraceId} = sofia_orchestrator:execute_sfc([auth_step, validate_step], [start], #{}),
     ?assertEqual([start, auth, valid], Result),
     
     AuthPid ! stop,
@@ -439,7 +440,7 @@ test_orchestrator_sfc_saga() ->
     
     %% Run SFC with a non-existent second service to trigger failure
     Chain = [auth_step, non_existent_step],
-    {error, {saga_rolled_back, {failed_at, non_existent_step, _Reason}}} = 
+    {error, {saga_rolled_back, {failed_at, non_existent_step, _Reason}}, _TraceId} = 
         sofia_orchestrator:execute_sfc(Chain, [start], #{policy => saga, timeout => 200}),
         
     %% Assert that compensation was triggered on auth_step
@@ -484,7 +485,7 @@ name: orchestrated_workflow
     
     timer:sleep(50),
     
-    {ok, CompletedNodes} = sofia_orchestrator:execute_workflow(Workflow, step_a, [start]),
+    {ok, CompletedNodes, _TraceId} = sofia_orchestrator:execute_workflow(Workflow, step_a, [start]),
     
     %% Verify all nodes completed
     ?assertEqual(2, length(CompletedNodes)),
@@ -494,4 +495,50 @@ name: orchestrated_workflow
     PidB ! stop,
     ok = sofia_registry:deregister_service(step_a, PidA),
     ok = sofia_registry:deregister_service(step_b, PidB).
+
+test_orchestrator_tracing() ->
+    ok = sofia_tracer:clear(),
+    
+    AuthPid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                timer:sleep(10), %% add measurable duration
+                sofia_sfc:forward_chain(Remaining, Payload ++ [auth], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    ValidatePid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                timer:sleep(15), %% add measurable duration
+                sofia_sfc:forward_chain(Remaining, Payload ++ [valid], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(auth_step, AuthPid),
+    ok = sofia_registry:register_service(validate_step, ValidatePid),
+    
+    timer:sleep(50),
+    
+    {ok, _Result, TraceId} = sofia_orchestrator:execute_sfc([auth_step, validate_step], [start], #{}),
+    
+    %% Retrieve spans from the tracer
+    Spans = sofia_tracer:get_trace(TraceId),
+    ?assertEqual(2, length(Spans)),
+    
+    [Span1, Span2] = Spans,
+    ?assertEqual(auth_step, maps:get(name, Span1)),
+    ?assertEqual(validate_step, maps:get(name, Span2)),
+    
+    %% Verify duration calculations
+    ?assert(maps:get(duration, Span1) >= 10000), %% 10ms in microseconds
+    ?assert(maps:get(duration, Span2) >= 15000), %% 15ms in microseconds
+    
+    AuthPid ! stop,
+    ValidatePid ! stop,
+    ok = sofia_registry:deregister_service(auth_step, AuthPid),
+    ok = sofia_registry:deregister_service(validate_step, ValidatePid).
 

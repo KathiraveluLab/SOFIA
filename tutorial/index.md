@@ -31,3 +31,7 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
 9. **[Chapter 9: Supervised Orchestration and Sagas](09_supervised_orchestration_and_sagas.md)**
    Implement process supervision, state-recovery timers, and compensating sagas inside SFC and Hypergraph Workflows.
 
+10. **[Chapter 10: Distributed Observability and Tracing](10_distributed_observability_and_tracing.md)**
+    Monitor execution latency and reconstruct call trees using distributed traces and spans.
+
+

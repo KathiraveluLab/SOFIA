@@ -18,7 +18,8 @@ sofia_integration_test_() ->
       fun test_http_gateway_openapi/0,
       fun test_backpressure/0,
       fun test_saga_recovery/0,
-      fun test_qos_routing/0
+      fun test_qos_routing/0,
+      fun test_rate_limiter/0
      ]}.
 
 setup() ->
@@ -524,4 +525,63 @@ test_qos_routing() ->
     ok = sofia_registry:deregister_service(qos_service, QosServer2),
     exit(QosServer1, kill),
     exit(QosServer2, kill).
+
+test_rate_limiter() ->
+    ok = application:ensure_started(inets),
+    
+    %% Set strict SLA limit: 1.0 tokens/sec, max capacity 1.0
+    ok = sofia_rate_limiter:set_sla(<<"test_client">>, 1.0, 1.0),
+    
+    MockPid = spawn(fun L() ->
+        receive
+            {'$gen_call', From, {add, Payload}} ->
+                A = maps:get(a, Payload),
+                B = maps:get(b, Payload),
+                gen_server:reply(From, {ok, A + B}),
+                L();
+            stop -> ok
+        end
+    end),
+    Contract = #{
+        methods => #{
+            add => #{
+                input_schema => #{
+                    a => integer,
+                    b => integer
+                }
+            }
+        }
+    },
+    ok = sofia_registry:register_service(rate_limited_service, MockPid, Contract),
+    timer:sleep(50),
+    
+    ValidBody = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 10, <<"b">> => 20}}),
+    
+    %% First request should succeed (200 OK)
+    {ok, {{_, 200, _}, _, ResponseBody1}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/rate_limited_service",
+                             [{"content-type", "application/json"},
+                              {"x-sofia-client-id", "test_client"}],
+                             "application/json", ValidBody}, [], []),
+    Decoded1 = jsx:decode(list_to_binary(ResponseBody1), [return_maps]),
+    ?assertEqual(#{<<"status">> => <<"success">>, <<"result">> => 30}, Decoded1),
+    
+    %% Second request immediately following should be rate limited (429 Too Many Requests)
+    {ok, {{_, 429, _}, _, ResponseBody2}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/rate_limited_service",
+                             [{"content-type", "application/json"},
+                              {"x-sofia-client-id", "test_client"}],
+                             "application/json", ValidBody}, [], []),
+    Decoded2 = jsx:decode(list_to_binary(ResponseBody2), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded2)),
+    ?assertEqual(<<"rate_limited">>, maps:get(<<"reason">>, Decoded2)),
+    
+    %% Clean up
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(rate_limited_service, MockPid),
+    ok = application:stop(inets),
+    
+    %% Clear SLA record from Mnesia
+    F = fun() -> mnesia:delete({sofia_slas, <<"test_client">>}) end,
+    mnesia:transaction(F).
 

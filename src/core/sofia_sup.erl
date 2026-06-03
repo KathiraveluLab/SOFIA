@@ -79,6 +79,12 @@ init([]) ->
             start => {sofia_tracer, start_link, []},
             restart => permanent,
             type => worker
+        },
+        #{
+            id => sofia_rate_limiter,
+            start => {sofia_rate_limiter, start_link, []},
+            restart => permanent,
+            type => worker
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

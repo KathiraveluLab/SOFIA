@@ -13,43 +13,56 @@ handle_request(<<"POST">>, true, Req) ->
     ServiceNameBin = cowboy_req:binding(service_name, Req),
     ServiceAtom = list_to_atom(binary_to_list(ServiceNameBin)),
     
-    SecurityReq = case sofia_registry:get_contract(ServiceAtom) of
-        {ok, #{security := SecRule}} -> SecRule;
-        _ -> none
+    LimiterClientId = case cowboy_req:header(<<"x-sofia-client-id">>, Req) of
+        undefined -> <<"anonymous">>;
+        Val -> Val
     end,
     
-    case SecurityReq of
-        hmac ->
-            ClientId = cowboy_req:header(<<"x-sofia-client-id">>, Req),
-            Signature = cowboy_req:header(<<"x-sofia-signature">>, Req),
-            Timestamp = cowboy_req:header(<<"x-sofia-timestamp">>, Req),
-            case {ClientId, Signature, Timestamp} of
-                {undefined, _, _} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
-                {_, undefined, _} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
-                {_, _, undefined} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
-                {CI, Sig, TS} ->
+    case sofia_rate_limiter:check_rate(LimiterClientId) of
+        {error, rate_limited} ->
+            send_response(429, #{
+                status => <<"error">>,
+                reason => <<"rate_limited">>,
+                details => <<"Rate limit exceeded for client SLA.">>
+            }, Req);
+        ok ->
+            SecurityReq = case sofia_registry:get_contract(ServiceAtom) of
+                {ok, #{security := SecRule}} -> SecRule;
+                _ -> none
+            end,
+            case SecurityReq of
+                hmac ->
+                    ClientId = cowboy_req:header(<<"x-sofia-client-id">>, Req),
+                    Signature = cowboy_req:header(<<"x-sofia-signature">>, Req),
+                    Timestamp = cowboy_req:header(<<"x-sofia-timestamp">>, Req),
+                    case {ClientId, Signature, Timestamp} of
+                        {undefined, _, _} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
+                        {_, undefined, _} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
+                        {_, _, undefined} -> send_response(401, #{status => <<"error">>, reason => <<"missing_auth_headers">>}, Req);
+                        {CI, Sig, TS} ->
+                            case read_body_loop(Req, <<>>) of
+                                {ok, Body, Req2} ->
+                                    case sofia_auth:verify_payload(CI, TS, Sig, Body) of
+                                        ok ->
+                                            process_body(ServiceAtom, Body, Req2);
+                                        {error, AuthReason} ->
+                                            send_response(403, #{
+                                                status => <<"error">>,
+                                                reason => <<"forbidden">>,
+                                                details => format_reason(AuthReason)
+                                            }, Req2)
+                                    end;
+                                {error, Reason, Req2} ->
+                                    send_response(500, #{status => <<"error">>, reason => <<"failed_to_read_body">>, details => format_reason(Reason)}, Req2)
+                            end
+                    end;
+                none ->
                     case read_body_loop(Req, <<>>) of
                         {ok, Body, Req2} ->
-                            case sofia_auth:verify_payload(CI, TS, Sig, Body) of
-                                ok ->
-                                    process_body(ServiceAtom, Body, Req2);
-                                {error, AuthReason} ->
-                                    send_response(403, #{
-                                        status => <<"error">>,
-                                        reason => <<"forbidden">>,
-                                        details => format_reason(AuthReason)
-                                    }, Req2)
-                            end;
+                            process_body(ServiceAtom, Body, Req2);
                         {error, Reason, Req2} ->
                             send_response(500, #{status => <<"error">>, reason => <<"failed_to_read_body">>, details => format_reason(Reason)}, Req2)
                     end
-            end;
-        none ->
-            case read_body_loop(Req, <<>>) of
-                {ok, Body, Req2} ->
-                    process_body(ServiceAtom, Body, Req2);
-                {error, Reason, Req2} ->
-                    send_response(500, #{status => <<"error">>, reason => <<"failed_to_read_body">>, details => format_reason(Reason)}, Req2)
             end
     end;
 handle_request(<<"GET">>, _, Req) ->

@@ -15,7 +15,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, stop/1]).
+-export([start_link/1, start_link/2, stop/1]).
 -export([ping/1]).
 
 %% gen_server callbacks
@@ -30,10 +30,15 @@
 %% API functions
 %% ===================================================================
 
-%% @doc Starts the service and registers it under the provided ServiceType.
+%% @doc Starts the service and registers it under the provided ServiceType with no metadata.
 -spec start_link(ServiceType :: atom()) -> {ok, pid()} | {error, term()}.
 start_link(ServiceType) ->
-    gen_server:start_link(?MODULE, [ServiceType], []).
+    start_link(ServiceType, #{}).
+
+%% @doc Starts the service and registers it under the provided ServiceType with metadata.
+-spec start_link(ServiceType :: atom(), Metadata :: map()) -> {ok, pid()} | {error, term()}.
+start_link(ServiceType, Metadata) ->
+    gen_server:start_link(?MODULE, [ServiceType, Metadata], []).
 
 %% @doc Stops the service.
 -spec stop(Pid :: pid()) -> ok.
@@ -50,8 +55,12 @@ ping(Pid) ->
 %% ===================================================================
 
 %% @private
+init([ServiceType, Metadata]) ->
+    %% Register this service process under the specified service type in the federated registry,
+    %% including any metadata for attribute-based discovery.
+    ok = sofia_registry:register_service(ServiceType, self(), #{}, Metadata),
+    {ok, #state{service_type = ServiceType, custom_state = undefined}};
 init([ServiceType]) ->
-    %% Register this service process under the specified service type in the federated registry
     ok = sofia_registry:register_service(ServiceType, self()),
     {ok, #state{service_type = ServiceType, custom_state = undefined}}.
 

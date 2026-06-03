@@ -67,7 +67,9 @@ init([]) ->
     end,
     Dispatch = cowboy_router:compile([
         {'_', [
-            {"/api/v1/service/:service_name", sofia_http_handler, []}
+            {"/health",                         sofia_http_handler, []},
+            {"/metrics",                        sofia_http_handler, []},
+            {"/api/v1/service/:service_name",   sofia_http_handler, []}
         ]}
     ]),
     {ok, _} = cowboy:start_clear(sofia_http_listener,

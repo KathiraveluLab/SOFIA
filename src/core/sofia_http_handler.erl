@@ -68,17 +68,43 @@ handle_request(<<"POST">>, true, Req) ->
             end
     end;
 handle_request(<<"GET">>, _, Req) ->
-    ServiceNameBin = cowboy_req:binding(service_name, Req),
-    ServiceAtom = list_to_atom(binary_to_list(ServiceNameBin)),
-    case sofia_registry:get_contract(ServiceAtom) of
-        {ok, Contract} ->
-            OpenApiSpec = to_openapi(ServiceAtom, Contract),
-            send_response(200, OpenApiSpec, Req);
-        {error, no_contract} ->
-            send_response(404, #{
-                status => <<"error">>,
-                reason => <<"no_contract_registered">>
-            }, Req)
+    Path = cowboy_req:path(Req),
+    case Path of
+        <<"/health">> ->
+            NodeInfo = #{
+                status  => <<"ok">>,
+                node    => list_to_binary(atom_to_list(node())),
+                uptime  => element(1, erlang:statistics(wall_clock))
+            },
+            send_response(200, NodeInfo, Req);
+        <<"/metrics">> ->
+            %% Collect circuit breaker states
+            BreakerStates = ets:tab2list(sofia_breakers_table),
+            BreakerList = [#{service => atom_to_binary(S, utf8), state => atom_to_binary(St, utf8),
+                             failures => F}
+                           || {S, St, F, _} <- BreakerStates],
+            %% DLQ depth
+            {ok, DLQEntries} = sofia_dlq:list(),
+            DLQDepth = length(DLQEntries),
+            Metrics = #{
+                node         => list_to_binary(atom_to_list(node())),
+                dlq_depth    => DLQDepth,
+                circuit_breakers => BreakerList
+            },
+            send_response(200, Metrics, Req);
+        _ ->
+            ServiceNameBin = cowboy_req:binding(service_name, Req),
+            ServiceAtom = list_to_atom(binary_to_list(ServiceNameBin)),
+            case sofia_registry:get_contract(ServiceAtom) of
+                {ok, Contract} ->
+                    OpenApiSpec = to_openapi(ServiceAtom, Contract),
+                    send_response(200, OpenApiSpec, Req);
+                {error, no_contract} ->
+                    send_response(404, #{
+                        status => <<"error">>,
+                        reason => <<"no_contract_registered">>
+                    }, Req)
+            end
     end;
 handle_request(_, _, Req) ->
     send_response(405, #{status => <<"error">>, reason => <<"method_not_allowed">>}, Req).
@@ -177,7 +203,7 @@ to_openapi(ServiceName, Contract) ->
     Version = maps:get(version, Contract, <<"1.0.0">>),
     Methods = maps:get(methods, Contract, #{}),
     Paths = #{
-        list_to_binary("/services/" ++ atom_to_list(ServiceName)) => #{
+        list_to_binary("/api/v1/service/" ++ atom_to_list(ServiceName)) => #{
             <<"post">> => #{
                 <<"summary">> => list_to_binary("Invoke method on " ++ atom_to_list(ServiceName)),
                 <<"requestBody">> => #{

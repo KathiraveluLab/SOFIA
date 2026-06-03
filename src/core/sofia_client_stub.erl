@@ -31,8 +31,10 @@ call_service(ServiceType, Request) ->
 %% @doc Invokes a service with custom circuit breaker options.
 -spec call_service(ServiceType :: atom(), Request :: term(), BreakerOpts :: map()) -> {ok, Reply :: term()} | {error, Reason :: term()}.
 call_service(ServiceType, Request, BreakerOpts) ->
-    %% 1. Discover a service instance from the federated registry
-    case sofia_registry:discover(ServiceType) of
+    %% Use QoS-aware router: picks the healthiest endpoint (best breaker state,
+    %% shortest mailbox, lowest historical latency). Falls back to first-in-list.
+    BestFirstFun = fun(_, [Best | _]) -> {ok, Best} end,
+    case sofia_router:route(ServiceType, Request, BestFirstFun) of
         {error, Reason} ->
             {error, {service_discovery_failed, Reason}};
         {ok, ServicePid} ->
@@ -43,15 +45,10 @@ call_service(ServiceType, Request, BreakerOpts) ->
                 undefined ->
                     {error, service_dead};
                 _ ->
-                    %% 2. Define the invocation function
                     InvocationFun = fun() ->
                         gen_server:call(ServicePid, Request)
                     end,
-                    
-                    %% 3. Generate a circuit breaker ID specific to the service type
                     BreakerId = list_to_atom(atom_to_list(ServiceType) ++ "_breaker"),
-                    
-                    %% 4. Verify contract validation if a contract is registered
                     case sofia_registry:get_contract(ServiceType) of
                         {ok, Contract} ->
                             case Request of
@@ -63,11 +60,9 @@ call_service(ServiceType, Request, BreakerOpts) ->
                                             {error, {contract_validation_failed, ValReason}}
                                     end;
                                 _ ->
-                                    %% Bypass validation if not a schema-compatible request structure
                                     sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
                             end;
                         {error, no_contract} ->
-                            %% No contract registered, bypass validation
                             sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
                     end
             end

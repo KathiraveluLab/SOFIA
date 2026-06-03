@@ -5,7 +5,7 @@ SOFIA is a lightweight, Erlang-based framework designed for building scalable, f
 ## Core Features
 
 - **Federated Service Registry (`sofia_registry`)**: Fully decentralized service registration and discovery using Erlang process groups (`pg`).
-- **Stateful Circuit Breaker (`sofia_breaker`)**: Low-latency, ETS-backed circuit breaker protecting distributed service calls from cascading failures.
+- **Stateful Circuit Breaker (`sofia_breaker`)**: Low-latency, Erlang Term Storage (ETS)-backed circuit breaker protecting distributed service calls from cascading failures.
 - **Federated Configuration Sync (`sofia_config`)**: Decoupled, replicated configuration settings synchronized across nodes via lightweight cluster RPCs.
 - **Protocol Gateway (`sofia_gateway`)**: Dynamic protocol bridging translating external sensor/web requests (e.g. JSON maps) into native message tuples.
 - **Content-Based Router (`sofia_router`)**: Dynamic routing of service requests to specific target Pids based on payload criteria.

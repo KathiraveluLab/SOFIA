@@ -1,0 +1,17 @@
+# SOFIA Tutorial Series: Federated Service Orchestration
+
+Welcome to the SOFIA step-by-step tutorial series. This documentation is structured to guide you from building your first federated service to implementing advanced communication patterns in a decentralized environment.
+
+## Tutorial Chapters
+
+1. **[Chapter 1: Creating and Registering Services](01_creating_and_registering_services.md)**
+   Learn how to build a standard Erlang service and register it with SOFIA's decentralized registry.
+   
+2. **[Chapter 2: Invoking Services with Circuit Breaker Protection](02_invoking_services_with_circuit_breaker.md)**
+   Understand how to discover active services and shield your invocations against failures using client-side circuit breakers.
+
+3. **[Chapter 3: Distributed Configuration and Swarms](03_distributed_configuration_and_swarms.md)**
+   Set up local multi-node clusters (swarms), connect nodes, and observe configuration synchronization in real-time.
+
+4. **[Chapter 4: Common Design Patterns](04_common_design_patterns.md)**
+   Explore out-of-the-box implementations for brokerless Publish-Subscribe (Pub-Sub) and Push-Pull Pipelines.

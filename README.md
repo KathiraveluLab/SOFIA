@@ -32,7 +32,7 @@ rebar3 eunit
 ## Guides and Documentation
 
 For complete walkthroughs and domain integrations, see:
-- **[Tutorial Guide (Tutorial.md)](Tutorial.md)**: Detailed step-by-step instructions on setting up local multi-node clusters, registering services, and executing Saga rollbacks.
+- **[Tutorial Series (tutorial/index.md)](tutorial/index.md)**: Modular step-by-step instructions on setting up local multi-node clusters, registering services, and implementing patterns.
 - **[Verifiable Use Cases (Usecases.md)](Usecases.md)**: Real-world templates for water quality monitoring, industrial carbon tracking, and clinic referrals using SOFIA.
 
 

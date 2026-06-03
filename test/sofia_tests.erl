@@ -14,7 +14,9 @@ sofia_full_test_() ->
       fun test_transformer/0,
       fun test_saga/0,
       fun test_skeleton_and_stub/0,
-      fun test_healthcare_finance_interconnection/0
+      fun test_healthcare_finance_interconnection/0,
+      fun test_pubsub/0,
+      fun test_pipeline/0
      ]}.
 
 setup() ->
@@ -283,3 +285,91 @@ test_healthcare_finance_interconnection() ->
 
     ProcessorPid ! stop,
     ok = sofia_registry:deregister_service(payment_processor, ProcessorPid).
+
+test_pubsub() ->
+    Self = self(),
+    _Sub1 = spawn(fun() ->
+        ok = sofia_pubsub:subscribe("market_feed"),
+        receive
+            {sofia_pubsub, "market_feed", Msg} -> Self ! {sub1, Msg}
+        end
+    end),
+    _Sub2 = spawn(fun() ->
+        ok = sofia_pubsub:subscribe("market_feed"),
+        receive
+            {sofia_pubsub, "market_feed", Msg} -> Self ! {sub2, Msg}
+        end
+    end),
+    
+    %% Allow registration to propagate
+    timer:sleep(50),
+    
+    %% Publish message
+    Count = sofia_pubsub:publish("market_feed", "hello_world"),
+    ?assertEqual(2, Count),
+    
+    %% Assert both received it
+    receive {sub1, Msg1} -> ?assertEqual("hello_world", Msg1) end,
+    receive {sub2, Msg2} -> ?assertEqual("hello_world", Msg2) end,
+    
+    %% Unsubscribe test using current process
+    ok = sofia_pubsub:subscribe("feed_test"),
+    ?assertEqual(1, sofia_pubsub:publish("feed_test", "msg1")),
+    receive
+        {sofia_pubsub, "feed_test", "msg1"} -> ok
+    after 100 ->
+        ?assert(false)
+    end,
+    
+    ok = sofia_pubsub:unsubscribe("feed_test"),
+    ?assertEqual(0, sofia_pubsub:publish("feed_test", "msg2")),
+    receive
+        {sofia_pubsub, "feed_test", "msg2"} -> ?assert(false)
+    after 100 ->
+        ok
+    end.
+
+test_pipeline() ->
+    Self = self(),
+    %% Run workers in a recursive loop to handle multiple/random tasks
+    Loop = fun L(Name) ->
+        receive
+            {sofia_pipeline_task, "job_pipeline", Task} ->
+                Self ! {Name, Task},
+                L(Name);
+            stop -> ok
+        end
+    end,
+    Worker1 = spawn(fun() -> ok = sofia_pipeline:register_worker("job_pipeline"), Loop(worker1) end),
+    Worker2 = spawn(fun() -> ok = sofia_pipeline:register_worker("job_pipeline"), Loop(worker2) end),
+    
+    timer:sleep(50),
+    
+    %% Push two tasks
+    ?assertEqual(ok, sofia_pipeline:push_task("job_pipeline", task1)),
+    ?assertEqual(ok, sofia_pipeline:push_task("job_pipeline", task2)),
+    
+    %% Collect 2 results in any order due to randomized load balancing
+    Results = collect_pipeline_results(2, []),
+    ?assertEqual(2, length(Results)),
+    
+    %% Verify both tasks were processed
+    Tasks = [T || {_, T} <- Results],
+    ?assert(lists:member(task1, Tasks)),
+    ?assert(lists:member(task2, Tasks)),
+    
+    %% Verify push returns error when no workers are left
+    ?assertEqual({error, no_service_available}, sofia_pipeline:push_task("non_existent", task3)),
+    
+    %% Clean up
+    sofia_pipeline:deregister_worker("job_pipeline"),
+    Worker1 ! stop,
+    Worker2 ! stop.
+
+collect_pipeline_results(0, Acc) -> Acc;
+collect_pipeline_results(N, Acc) ->
+    receive
+        {Worker, Task} -> collect_pipeline_results(N - 1, [{Worker, Task} | Acc])
+    after 200 ->
+        Acc
+    end.

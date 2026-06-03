@@ -13,7 +13,8 @@ sofia_full_test_() ->
       fun test_router/0,
       fun test_transformer/0,
       fun test_saga/0,
-      fun test_skeleton_and_stub/0
+      fun test_skeleton_and_stub/0,
+      fun test_healthcare_finance_interconnection/0
      ]}.
 
 setup() ->
@@ -215,3 +216,70 @@ test_skeleton_and_stub() ->
     
     %% Verify deregistration works (service deregistered during terminate)
     ?assertEqual({error, no_service_available}, sofia_registry:discover(ServiceType)).
+
+test_healthcare_finance_interconnection() ->
+    %% Start mock payment processor process running a loop
+    Loop = fun L() ->
+        receive
+            {'$gen_call', From, {payment_gateway_charge, <<"pat_9901">>, 12500, <<"stripe">>}} ->
+                gen_server:reply(From, {ok, stripe_tx_88921}),
+                L();
+            stop -> ok
+        end
+    end,
+    ProcessorPid = spawn(Loop),
+    ok = sofia_registry:register_service(payment_processor, ProcessorPid),
+
+    %% 1. Gateway Request Ingestion
+    BillingPayload = #{
+        <<"action">> => <<"payment_gateway_charge">>,
+        <<"patient_id">> => <<"pat_9901">>,
+        <<"billing_cents">> => 12500,
+        <<"method">> => <<"stripe">>
+    },
+    
+    %% Gateway translates the request and routes it to payment_processor MockServer, returning the payment ref
+    {ok, ChargeRef} = sofia_gateway:handle_request(payment_processor, BillingPayload, gateway_breaker),
+    ?assertEqual(stripe_tx_88921, ChargeRef),
+
+    %% 2. Transformer mapping patient keys to gateway format
+    StripeSchemaRules = #{
+        billing_cents => amount,
+        patient_id => customer_ref
+    },
+    PaymentParams = sofia_transformer:transform(#{patient_id => <<"pat_9901">>, billing_cents => 12500}, StripeSchemaRules),
+    ?assertEqual(#{customer_ref => <<"pat_9901">>, amount => 12500}, PaymentParams),
+
+    %% 3. Router selects correct payment processor PID (mocked Stripe PID)
+    ProcessorRouter = fun(Payload, Pids) ->
+        case maps:get(method, Payload, <<"stripe">>) of
+            <<"stripe">> -> {ok, hd(Pids)};
+            <<"paypal">> -> {ok, lists:last(Pids)}
+        end
+    end,
+    {ok, TargetProcessorPid} = sofia_router:route(payment_processor, #{method => <<"stripe">>}, ProcessorRouter),
+    ?assertEqual(ProcessorPid, TargetProcessorPid),
+
+    %% 4. Execute the call protected by a local circuit breaker
+    CallFun = fun() -> gen_server:call(TargetProcessorPid, {payment_gateway_charge, <<"pat_9901">>, 12500, <<"stripe">>}) end,
+    {ok, TxId} = sofia_breaker:call(stripe_breaker, CallFun),
+    ?assertEqual(stripe_tx_88921, TxId),
+
+    %% 5. Saga orchestration coordinates payment capture and appointment booking
+    ChargePayment = fun() -> {ok, stripe_tx_88921} end,
+    VoidPayment = fun(RefId) -> ?assertEqual(stripe_tx_88921, RefId), {ok, voided} end,
+
+    %% Appointment booking fails to trigger compensation
+    BookAppointmentFail = fun() -> {error, room_capacity_reached} end,
+    CancelAppointment = fun(_) -> ok end,
+
+    TransactionSteps = [
+        {ChargePayment, VoidPayment},
+        {BookAppointmentFail, CancelAppointment}
+    ],
+
+    SagaResult = sofia_saga:execute(TransactionSteps),
+    ?assertEqual({error, {step_failed, room_capacity_reached, [{ok, {ok, voided}}]}}, SagaResult),
+
+    ProcessorPid ! stop,
+    ok = sofia_registry:deregister_service(payment_processor, ProcessorPid).

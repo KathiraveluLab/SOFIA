@@ -69,7 +69,7 @@ AuditorRouter = fun(Payload, Pids) ->
     Carbon = maps:get(carbon_tons, Payload),
     case Carbon > 500 of
         true -> {ok, lists:last(Pids)}; % Specialized high-capacity auditor
-        false -> {ok, lists:first(Pids)} % Standard auditor
+        false -> {ok, hd(Pids)} % Standard auditor
     end
 end.
 
@@ -146,4 +146,69 @@ case sofia_registry:discover(credential_verifier) of
     {error, no_service_available} ->
         {error, verifier_offline}
 end.
+```
+
+---
+
+## 6. Domain 5: Healthcare and Finance/Payment Gateway Interconnection
+
+Integrates patient checkout and billing in a healthcare portal with decentralized payment processors using the full suite of SOFIA components.
+
+### 6.1. Gateway & Schema Translation
+External billing requests are ingested as maps by the gateway and normalized using `sofia_transformer`:
+```erlang
+BillingPayload = #{
+    <<"action">> => <<"payment_gateway_charge">>,
+    <<"patient_id">> => <<"pat_9901">>,
+    <<"billing_cents">> => 12500, % $125.00
+    <<"method">> => <<"stripe">>
+}.
+
+%% 1. Translate via gateway
+NativeRequest = sofia_gateway:handle_request(payment_processor, BillingPayload, gateway_breaker).
+
+%% 2. Transform schema keys for Stripe gateway format
+StripeSchemaRules = #{
+    billing_cents => amount,
+    patient_id => customer_ref
+}.
+PaymentParams = sofia_transformer:transform(#{patient_id => <<"pat_9901">>, billing_cents => 12500}, StripeSchemaRules).
+%% Returns: #{customer_ref => <<"pat_9901">>, amount => 12500}
+```
+
+### 6.2. Content-Based Routing & Circuit Breaker
+Requests are dynamically routed to the appropriate processor pid based on the selected payment method, with client-side circuit breaker protection:
+```erlang
+ProcessorRouter = fun(Payload, Pids) ->
+    case maps:get(method, Payload, <<"stripe">>) of
+        <<"stripe">> -> {ok, hd(Pids)};
+        <<"paypal">> -> {ok, lists:last(Pids)}
+    end
+end.
+
+{ok, ProcessorPid} = sofia_router:route(payment_processor, #{method => <<"stripe">>}, ProcessorRouter).
+
+%% Invoke call with stripe-specific circuit breaker protection
+CallFun = fun() -> gen_server:call(ProcessorPid, {charge, PaymentParams}) end,
+{ok, ChargeRef} = sofia_breaker:call(stripe_breaker, CallFun).
+```
+
+### 6.3. Saga-based Payment & Service Booking
+Coordinates a multi-step transaction involving patient billing and scheduling. If scheduling fails, the payment is automatically voided:
+```erlang
+%% Step 1: Charge Payment via Stripe
+ChargePayment = fun() -> {ok, stripe_tx_88921} end,
+VoidPayment = fun(TxId) -> io:format("Voiding Stripe transaction ~p~n", [TxId]), ok end,
+
+%% Step 2: Book Clinic Appointment
+BookAppointment = fun() -> {ok, appt_44102} end,
+CancelAppointment = fun(ApptId) -> io:format("Canceling appointment ~p~n", [ApptId]), ok end,
+
+%% Execute Federated Transaction
+TransactionSteps = [
+    {ChargePayment, VoidPayment},
+    {BookAppointment, CancelAppointment}
+],
+sofia_saga:execute(TransactionSteps).
+```
 ```

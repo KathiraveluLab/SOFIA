@@ -39,6 +39,11 @@ translate_payload(#{<<"action">> := <<"add">>, <<"args">> := [A, B]}) ->
     {add, A, B};
 translate_payload(#{<<"action">> := <<"subtract">>, <<"args">> := [A, B]}) ->
     {subtract, A, B};
+translate_payload(#{<<"action">> := <<"payment_gateway_charge">>,
+                    <<"patient_id">> := PatientId,
+                    <<"billing_cents">> := Cents,
+                    <<"method">> := Method}) ->
+    {payment_gateway_charge, PatientId, Cents, Method};
 translate_payload(Payload) ->
     %% Fallback mapping
     {raw_request, Payload}.

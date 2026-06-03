@@ -1,5 +1,6 @@
 -module(sofia_integration_tests).
 -include_lib("eunit/include/eunit.hrl").
+-export([recovery_compensate/2]).
 
 sofia_integration_test_() ->
     {setup,
@@ -15,7 +16,8 @@ sofia_integration_test_() ->
       fun test_http_gateway/0,
       fun test_http_gateway_auth/0,
       fun test_http_gateway_openapi/0,
-      fun test_backpressure/0
+      fun test_backpressure/0,
+      fun test_saga_recovery/0
      ]}.
 
 setup() ->
@@ -456,4 +458,39 @@ test_http_gateway_openapi() ->
     MockPid ! stop,
     ok = sofia_registry:deregister_service(openapi_test_service, MockPid),
     ok = application:stop(inets).
+
+recovery_compensate(Table, Result) ->
+    ets:insert(Table, {compensated, Result}),
+    ok.
+
+test_saga_recovery() ->
+    Table = ets:new(recovery_test_table, [public, set]),
+    
+    %% Manually insert a crashed "running" saga into the Mnesia table
+    SagaId = make_ref(),
+    
+    %% Define serializable MFA-based steps
+    %% Step 1 has a valid MFA compensation: {sofia_integration_tests, recovery_compensate, [Table]}
+    %% Step 2 has not started yet
+    Steps = [
+        {{erlang, self, []}, {sofia_integration_tests, recovery_compensate, [Table]}},
+        {{erlang, self, []}, {sofia_integration_tests, recovery_compensate, [Table]}}
+    ],
+    
+    Record = {sofia_sagas, SagaId, running, [{1, step1_result}], 2, Steps},
+    F = fun() -> mnesia:write(Record) end,
+    {atomic, ok} = mnesia:transaction(F),
+    
+    %% Trigger WAL recovery manually
+    ok = sofia_saga:recover_sagas(),
+    
+    %% Assert that the compensation for Step 1 was executed via recovery
+    ?assertEqual([{compensated, step1_result}], ets:lookup(Table, compensated)),
+    
+    %% Assert that the saga state has been updated to rolled_back
+    FRead = fun() -> mnesia:read(sofia_sagas, SagaId) end,
+    {atomic, [UpdatedRecord]} = mnesia:transaction(FRead),
+    ?assertEqual(rolled_back, element(3, UpdatedRecord)),
+    
+    ets:delete(Table).
 

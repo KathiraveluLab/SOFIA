@@ -10,9 +10,33 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
+    init_mnesia(),
     sofia_sup:start_link().
 
 stop(_State) ->
+    mnesia:stop(),
     ok.
 
-%% internal functions
+init_mnesia() ->
+    mnesia:start(),
+    case mnesia:create_schema([node()]) of
+        ok -> ok;
+        {error, {_, {already_exists, _}}} -> ok;
+        _ -> ok
+    end,
+    mnesia:start(),
+    Tables = [
+        {sofia_client_secrets, [client_id, secret]},
+        {span, [span_id, trace_id, parent_span_id, name, start_time, end_time, duration]}
+    ],
+    lists:foreach(fun({Name, Attrs}) ->
+        case mnesia:create_table(Name, [{disc_copies, [node()]}, {attributes, Attrs}, {type, set}]) of
+            {atomic, ok} -> ok;
+            {aborted, {already_exists, Name}} -> ok;
+            {aborted, {bad_type, _, _, _}} ->
+                %% Fallback to ram_copies if schema is ram-only (e.g. in test/non-distributed env)
+                mnesia:create_table(Name, [{ram_copies, [node()]}, {attributes, Attrs}, {type, set}]);
+            _Other -> ok
+        end
+    end, Tables),
+    mnesia:wait_for_tables([sofia_client_secrets, span], 5000).

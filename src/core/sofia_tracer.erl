@@ -5,8 +5,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -record(span, {
-    trace_id :: binary(),
     span_id :: binary(),
+    trace_id :: binary(),
     parent_span_id :: binary() | undefined,
     name :: atom() | string(),
     start_time :: integer(), %% microseconds
@@ -24,8 +24,8 @@ start_span(TraceId, Name, ParentSpanId) ->
 start_span(TraceId, SpanId, Name, ParentSpanId) ->
     StartTime = erlang:system_time(microsecond),
     Span = #span{
-        trace_id = TraceId,
         span_id = SpanId,
+        trace_id = TraceId,
         parent_span_id = ParentSpanId,
         name = Name,
         start_time = StartTime
@@ -45,31 +45,40 @@ clear() ->
 
 %% Gen_server callbacks
 init([]) ->
-    ets:new(sofia_spans, [set, named_table, {keypos, 3}, public]),
-    %% Note: span_id is the unique keypos (field 3 of #span is span_id)
     {ok, #{}}.
 
 handle_call({start_span, Span}, _From, State) ->
-    ets:insert(sofia_spans, Span),
+    F = fun() -> mnesia:write(span, Span, write) end,
+    mnesia:transaction(F),
     {reply, ok, State};
 
 handle_call({end_span, TraceId, SpanId, EndTime}, _From, State) ->
-    case ets:lookup(sofia_spans, SpanId) of
-        [Span] when Span#span.trace_id =:= TraceId ->
-            Duration = EndTime - Span#span.start_time,
-            UpdatedSpan = Span#span{end_time = EndTime, duration = Duration},
-            ets:insert(sofia_spans, UpdatedSpan),
-            {reply, ok, State};
-        [] ->
-            {reply, {error, not_found}, State}
-    end;
+    F = fun() ->
+        case mnesia:read(span, SpanId, write) of
+            [Span] when Span#span.trace_id =:= TraceId ->
+                Duration = EndTime - Span#span.start_time,
+                UpdatedSpan = Span#span{end_time = EndTime, duration = Duration},
+                mnesia:write(span, UpdatedSpan, write),
+                ok;
+            _ ->
+                {error, not_found}
+        end
+    end,
+    Res = case mnesia:transaction(F) of
+        {atomic, Result} -> Result;
+        {aborted, _Reason} -> {error, mnesia_error}
+    end,
+    {reply, Res, State};
 
 handle_call({get_trace, TraceId}, _From, State) ->
-    Spans = ets:select(sofia_spans, [{
-        #span{trace_id = TraceId, _ = '_'},
-        [],
-        ['$_']
-    }]),
+    F = fun() ->
+        Pattern = #span{trace_id = TraceId, _ = '_'},
+        mnesia:match_object(Pattern)
+    end,
+    Spans = case mnesia:transaction(F) of
+        {atomic, List} -> List;
+        _ -> []
+    end,
     Sorted = lists:keysort(#span.start_time, Spans),
     MapSpans = [#{
         trace_id => S#span.trace_id,
@@ -83,7 +92,8 @@ handle_call({get_trace, TraceId}, _From, State) ->
     {reply, MapSpans, State};
 
 handle_call(clear, _From, State) ->
-    ets:delete_all_objects(sofia_spans),
+    F = fun() -> mnesia:clear_table(span) end,
+    mnesia:transaction(F),
     {reply, ok, State};
 
 handle_call(_Req, _From, State) ->

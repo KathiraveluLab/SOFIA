@@ -52,25 +52,17 @@ verify_timestamp(TimestampBin) ->
         _:_ -> false
     end.
 
-%% @doc ETS-based storage of client secrets.
+%% @doc Mnesia-based storage of client secrets.
 get_client_secret(ClientId) ->
-    case ets:whereis(?TABLE) of
-        undefined ->
-            ets:new(?TABLE, [named_table, public, set]),
-            error;
-        _ ->
-            case ets:lookup(?TABLE, ClientId) of
-                [{ClientId, Secret}] -> {ok, Secret};
-                [] -> error
-            end
+    F = fun() -> mnesia:read(sofia_client_secrets, ClientId) end,
+    case mnesia:transaction(F) of
+        {atomic, [{sofia_client_secrets, ClientId, Secret}]} -> {ok, Secret};
+        _ -> error
     end.
 
 set_client_secret(ClientId, Secret) when is_binary(ClientId), is_binary(Secret) ->
-    case ets:whereis(?TABLE) of
-        undefined ->
-            ets:new(?TABLE, [named_table, public, set]);
-        _ ->
-            ok
-    end,
-    ets:insert(?TABLE, {ClientId, Secret}),
-    ok.
+    F = fun() -> mnesia:write({sofia_client_secrets, ClientId, Secret}) end,
+    case mnesia:transaction(F) of
+        {atomic, ok} -> ok;
+        {aborted, Reason} -> {error, Reason}
+    end.

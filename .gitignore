@@ -27,3 +27,8 @@ _bmad
 .vscode
 .agent
 .gemini
+
+# Mnesia database files
+Mnesia.*/
+Mnesia.*
+

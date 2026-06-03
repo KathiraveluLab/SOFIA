@@ -14,17 +14,19 @@ start(_StartType, _StartArgs) ->
     sofia_sup:start_link().
 
 stop(_State) ->
-    mnesia:stop(),
     ok.
 
 init_mnesia() ->
-    mnesia:start(),
-    case mnesia:create_schema([node()]) of
-        ok -> ok;
-        {error, {_, {already_exists, _}}} -> ok;
-        _ -> ok
+    case mnesia:system_info(is_running) of
+        yes -> ok;
+        _ ->
+            mnesia:start(),
+            case mnesia:create_schema([node()]) of
+                ok -> ok;
+                {error, {_, {already_exists, _}}} -> ok;
+                _ -> ok
+            end
     end,
-    mnesia:start(),
     Tables = [
         {sofia_client_secrets, [client_id, secret]},
         {span, [span_id, trace_id, parent_span_id, name, start_time, end_time, duration]}
@@ -34,7 +36,7 @@ init_mnesia() ->
             {atomic, ok} -> ok;
             {aborted, {already_exists, Name}} -> ok;
             {aborted, {bad_type, _, _, _}} ->
-                %% Fallback to ram_copies if schema is ram-only (e.g. in test/non-distributed env)
+                %% Fallback to ram_copies if schema is ram-only (e.g. in test env)
                 mnesia:create_table(Name, [{ram_copies, [node()]}, {attributes, Attrs}, {type, set}]);
             _Other -> ok
         end

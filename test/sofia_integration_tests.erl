@@ -18,7 +18,10 @@ sofia_integration_test_() ->
      ]}.
 
 setup() ->
-    ok = application:start(sasl),
+    case application:start(sasl) of
+        ok -> ok;
+        {error, {already_started, sasl}} -> ok
+    end,
     {ok, Apps} = application:ensure_all_started(sofia),
     Apps.
 

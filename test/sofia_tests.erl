@@ -18,7 +18,9 @@ sofia_full_test_() ->
       fun test_pubsub/0,
       fun test_pipeline/0,
       fun test_scatter_gather/0,
-      fun test_roa/0
+      fun test_roa/0,
+      fun test_multitenant/0,
+      fun test_sfc/0
      ]}.
 
 setup() ->
@@ -468,3 +470,81 @@ test_roa() ->
     
     %% Clean up (deregister)
     ok = sofia_roa:deregister_resource("/patients/101", ResourcePid).
+
+test_multitenant() ->
+    TenantAPid = spawn(fun() -> receive stop -> ok end end),
+    GlobalPid = spawn(fun() -> receive stop -> ok end end),
+    
+    ok = sofia_multitenant:register_tenant_service(tenant_A, calc_service, TenantAPid),
+    ok = sofia_multitenant:register_tenant_service(global, calc_service, GlobalPid),
+    
+    timer:sleep(50),
+    
+    %% Tenant A discovers Tenant A service
+    ?assertEqual({ok, TenantAPid}, sofia_multitenant:discover_tenant_service(tenant_A, calc_service)),
+    
+    %% Tenant B falls back to global/shared service
+    ?assertEqual({ok, GlobalPid}, sofia_multitenant:discover_tenant_service(tenant_B, calc_service)),
+    
+    %% Clean up
+    TenantAPid ! stop,
+    GlobalPid ! stop,
+    ok = sofia_multitenant:deregister_tenant_service(tenant_A, calc_service, TenantAPid),
+    ok = sofia_multitenant:deregister_tenant_service(global, calc_service, GlobalPid).
+
+test_sfc() ->
+    Self = self(),
+    
+    %% Create step processes that modify the payload and forward
+    AuthPid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [auth], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ValidatePid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [valid], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    LogPid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [logged], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(auth_step, AuthPid),
+    ok = sofia_registry:register_service(validate_step, ValidatePid),
+    ok = sofia_registry:register_service(log_step, LogPid),
+    
+    timer:sleep(50),
+    
+    %% Start chain
+    Chain = [auth_step, validate_step, log_step],
+    ok = sofia_sfc:start_chain(Chain, [start], Self),
+    
+    %% Verify completion response
+    receive
+        {sfc_complete, FinalPayload} ->
+            ?assertEqual([start, auth, valid, logged], FinalPayload)
+    after 1000 ->
+        ?assert(false)
+    end,
+    
+    %% Clean up
+    AuthPid ! stop,
+    ValidatePid ! stop,
+    LogPid ! stop,
+    ok = sofia_registry:deregister_service(auth_step, AuthPid),
+    ok = sofia_registry:deregister_service(validate_step, ValidatePid),
+    ok = sofia_registry:deregister_service(log_step, LogPid).

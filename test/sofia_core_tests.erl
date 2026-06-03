@@ -8,7 +8,8 @@ sofia_core_test_() ->
      [
       fun test_registry/0,
       fun test_breaker/0,
-      fun test_config/0
+      fun test_config/0,
+      fun test_contracts/0
      ]}.
 
 setup() ->
@@ -76,3 +77,48 @@ test_config() ->
     %% Local updates via set_local work
     ?assertEqual(ok, sofia_config:set_local(my_key2, 42)),
     ?assertEqual(42, sofia_config:get(my_key2)).
+
+test_contracts() ->
+    Contract = #{
+        methods => #{
+            add => #{
+                input_schema => #{
+                    a => integer,
+                    b => integer
+                }
+            }
+        }
+    },
+    
+    MockPid = spawn(fun L() ->
+        receive
+            {'$gen_call', From, {add, Payload}} ->
+                A = maps:get(a, Payload),
+                B = maps:get(b, Payload),
+                gen_server:reply(From, {ok, A + B}),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(contract_calc_service, MockPid, Contract),
+    
+    timer:sleep(50),
+    
+    %% Verify contract retrieval
+    ?assertEqual({ok, Contract}, sofia_registry:get_contract(contract_calc_service)),
+    
+    %% Call service with valid request
+    ?assertEqual({ok, 15}, sofia_client_stub:call_service(contract_calc_service, {add, #{a => 5, b => 10}})),
+    
+    %% Call service with missing parameter
+    ?assertEqual({error, {contract_validation_failed, {missing_parameter, b}}},
+                 sofia_client_stub:call_service(contract_calc_service, {add, #{a => 5}})),
+                 
+    %% Call service with type mismatch
+    ?assertEqual({error, {contract_validation_failed, {type_mismatch, b, integer, <<"not_int">>}}},
+                 sofia_client_stub:call_service(contract_calc_service, {add, #{a => 5, b => <<"not_int">>}})),
+                 
+    %% Clean up
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(contract_calc_service, MockPid).

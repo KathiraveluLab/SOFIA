@@ -44,9 +44,25 @@ call_service(ServiceType, Request, BreakerOpts) ->
             %% 3. Generate a circuit breaker ID specific to the service type
             BreakerId = list_to_atom(atom_to_list(ServiceType) ++ "_breaker"),
             
-            %% 4. Invoke the service through the circuit breaker
-            %% This protects the caller if the target process crashes or hangs.
-            sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
+            %% 4. Verify contract validation if a contract is registered
+            case sofia_registry:get_contract(ServiceType) of
+                {ok, Contract} ->
+                    case Request of
+                        {Method, Payload} when is_map(Payload) ->
+                            case sofia_contract:validate_request(Contract, Method, Payload) of
+                                ok ->
+                                    sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts);
+                                {error, ValReason} ->
+                                    {error, {contract_validation_failed, ValReason}}
+                            end;
+                        _ ->
+                            %% Bypass validation if not a schema-compatible request structure
+                            sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
+                    end;
+                {error, no_contract} ->
+                    %% No contract registered, bypass validation
+                    sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
+            end
     end.
 
 %% @doc Example client function to ping a service type.

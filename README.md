@@ -13,6 +13,24 @@ SOFIA is a lightweight, Erlang-based framework designed for building scalable, f
 - **Saga Orchestrator (`sofia_saga`)**: Fault-tolerant distributed transaction coordinator executing rollbacks in reverse order on failure.
 - **Zero Bloat**: No centralized broker, no complex workflow orchestration engines, and no SOAP/XML overhead.
 
+## Self-Describing Federated Services
+
+SOFIA supports self-describing services, offering a decentralized alternative to traditional IDLs like OpenAPI/Swagger or gRPC protocol buffers. Service providers register metadata contracts detailing schemas directly with `sofia_registry`. Client stubs retrieve these contracts and validate request payloads locally prior to invocation:
+
+```mermaid
+sequenceDiagram
+    participant Developer as Service Provider
+    participant Registry as sofia_registry
+    participant Client as Service Consumer
+    
+    Developer->>Registry: register_service(calc_service, Pid, ContractMap)
+    Note over Registry: Stores Contract in State
+    Client->>Registry: get_contract(calc_service)
+    Registry-->>Client: returns ContractMap
+    Client->>Client: Validate request schema locally
+    Client->>Developer: Safe Invocation
+```
+
 ## Building and Compiling
 
 To compile the SOFIA application, ensure you have Erlang/OTP 27 and `rebar3` installed. Then, run the following command from the root directory:

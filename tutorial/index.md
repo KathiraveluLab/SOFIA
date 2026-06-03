@@ -21,3 +21,6 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
 
 6. **[Chapter 6: Hypergraph Service Workflows](06_hypergraph_service_workflows.md)**
    Define, parse, and execute service workflows in the form of directed hypergraphs using YAML notation.
+
+7. **[Chapter 7: Self-Describing Federated Services](07_self_describing_services.md)**
+   Implement service contract registry mappings and perform client-side schema verification prior to actor invocation.

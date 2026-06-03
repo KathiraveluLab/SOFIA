@@ -11,6 +11,7 @@ forward_chain([], Payload, Originator) ->
     Originator ! {sfc_complete, Payload},
     ok;
 forward_chain([NextService | RemainingChain], Payload, Originator) ->
+    Originator ! {sfc_progress, NextService, Payload},
     case sofia_registry:discover(NextService) of
         {ok, ServicePid} ->
             ServicePid ! {sfc_step, RemainingChain, Payload, Originator},

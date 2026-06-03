@@ -12,7 +12,10 @@ sofia_patterns_test_() ->
       fun test_roa/0,
       fun test_multitenant/0,
       fun test_sfc/0,
-      fun test_workflow/0
+      fun test_workflow/0,
+      fun test_orchestrator_sfc_success/0,
+      fun test_orchestrator_sfc_saga/0,
+      fun test_orchestrator_workflow_success/0
      ]}.
 
 setup() ->
@@ -375,3 +378,120 @@ collect_wf_results(N, Acc) ->
     after 1000 ->
         Acc
     end.
+
+test_orchestrator_sfc_success() ->
+    AuthPid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [auth], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    ValidatePid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [valid], Originator),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(auth_step, AuthPid),
+    ok = sofia_registry:register_service(validate_step, ValidatePid),
+    
+    timer:sleep(50),
+    
+    %% Run SFC with Orchestrator (default retry policy)
+    {ok, Result} = sofia_orchestrator:execute_sfc([auth_step, validate_step], [start], #{}),
+    ?assertEqual([start, auth, valid], Result),
+    
+    AuthPid ! stop,
+    ValidatePid ! stop,
+    ok = sofia_registry:deregister_service(auth_step, AuthPid),
+    ok = sofia_registry:deregister_service(validate_step, ValidatePid).
+
+test_orchestrator_sfc_saga() ->
+    Self = self(),
+    
+    AuthPid = spawn(fun L() ->
+        receive
+            {sfc_step, Remaining, Payload, Originator} ->
+                sofia_sfc:forward_chain(Remaining, Payload ++ [auth], Originator),
+                L();
+            {'$gen_call', From, {undo_auth, Payload}} ->
+                Self ! {auth_compensated, Payload},
+                gen_server:reply(From, ok),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    %% Register service contract with compensation definition
+    Contract = #{
+        compensations => #{
+            do_auth => undo_auth
+        }
+    },
+    ok = sofia_registry:register_service(auth_step, AuthPid, Contract),
+    
+    timer:sleep(50),
+    
+    %% Run SFC with a non-existent second service to trigger failure
+    Chain = [auth_step, non_existent_step],
+    {error, {saga_rolled_back, {failed_at, non_existent_step, _Reason}}} = 
+        sofia_orchestrator:execute_sfc(Chain, [start], #{policy => saga, timeout => 200}),
+        
+    %% Assert that compensation was triggered on auth_step
+    receive
+        {auth_compensated, Payload} ->
+            ?assertEqual([start, auth], Payload)
+    after 1000 ->
+        ?assert(false)
+    end,
+    
+    AuthPid ! stop,
+    ok = sofia_registry:deregister_service(auth_step, AuthPid).
+
+test_orchestrator_workflow_success() ->
+    Yaml = "
+name: orchestrated_workflow
+- source: step_a
+  destinations:
+    - step_b
+",
+    {ok, Workflow} = sofia_workflow:parse_yaml(Yaml),
+    
+    PidA = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [a], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    PidB = spawn(fun L() ->
+        receive
+            {workflow_step, Wf, Node, Payload, Ref, Orig} ->
+                sofia_workflow:complete_step(Wf, Node, Payload ++ [b], Ref, Orig),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(step_a, PidA),
+    ok = sofia_registry:register_service(step_b, PidB),
+    
+    timer:sleep(50),
+    
+    {ok, CompletedNodes} = sofia_orchestrator:execute_workflow(Workflow, step_a, [start]),
+    
+    %% Verify all nodes completed
+    ?assertEqual(2, length(CompletedNodes)),
+    ?assertEqual([start, a, b], proplists:get_value(step_b, CompletedNodes)),
+    
+    PidA ! stop,
+    PidB ! stop,
+    ok = sofia_registry:deregister_service(step_a, PidA),
+    ok = sofia_registry:deregister_service(step_b, PidB).
+

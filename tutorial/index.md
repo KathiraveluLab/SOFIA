@@ -27,3 +27,7 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
 
 8. **[Chapter 8: External Edge Gateway with Cowboy](08_external_edge_gateway.md)**
    Expose federated services externally via HTTP/JSON API endpoints, complete with dynamic schema validation and error mapping.
+
+9. **[Chapter 9: Supervised Orchestration and Sagas](09_supervised_orchestration_and_sagas.md)**
+   Implement process supervision, state-recovery timers, and compensating sagas inside SFC and Hypergraph Workflows.
+

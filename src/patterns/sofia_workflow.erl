@@ -49,8 +49,8 @@ parse_destinations([Line | Rest] = All, Acc) ->
 execute(Workflow, StartNode, Payload, Originator) ->
     forward_step(Workflow, StartNode, Payload, make_ref(), Originator).
 
-%% @doc Executes a single step of the workflow by routing it to the registered node.
 forward_step(#{edges := _Edges} = Workflow, Node, Payload, Ref, Originator) ->
+    Originator ! {workflow_progress, Node, Payload, Ref},
     case sofia_registry:discover(Node) of
         {ok, Pid} ->
             Pid ! {workflow_step, Workflow, Node, Payload, Ref, Originator},
@@ -63,6 +63,7 @@ forward_step(#{edges := _Edges} = Workflow, Node, Payload, Ref, Originator) ->
 %% @doc Called by a step service when it completes execution.
 %% Routes the output payload to all destinations of the current source node.
 complete_step(#{edges := Edges} = Workflow, Node, NewPayload, Ref, Originator) ->
+    Originator ! {workflow_step_complete, Node, NewPayload, Ref},
     case maps:get(Node, Edges, []) of
         [] ->
             %% Leaf node: report branch completion to the originator

@@ -12,7 +12,8 @@ sofia_full_test_() ->
       fun test_gateway/0,
       fun test_router/0,
       fun test_transformer/0,
-      fun test_saga/0
+      fun test_saga/0,
+      fun test_skeleton_and_stub/0
      ]}.
 
 setup() ->
@@ -186,3 +187,31 @@ test_saga() ->
     ?assertEqual([{step1, compensated}], ets:lookup(T, step1)),
     
     ets:delete(T).
+
+test_skeleton_and_stub() ->
+    ServiceType = skeleton_test_service,
+    
+    %% Start the skeleton service
+    {ok, ServicePid} = sofia_service_skeleton:start_link(ServiceType),
+    ?assert(is_process_alive(ServicePid)),
+    
+    %% Verify discovery works (service registered during init)
+    ?assertEqual({ok, ServicePid}, sofia_registry:discover(ServiceType)),
+    
+    %% Verify ping works via the service directly
+    ?assertEqual(pong, sofia_service_skeleton:ping(ServicePid)),
+    
+    %% Verify ping works via the client stub
+    ?assertEqual(pong, sofia_client_stub:ping_service(ServiceType)),
+    
+    %% Verify custom call works via the client stub
+    ?assertEqual({ok, processed_payload}, sofia_client_stub:call_service(ServiceType, {custom_request, my_payload})),
+    
+    %% Stop the service
+    ok = sofia_service_skeleton:stop(ServicePid),
+    
+    %% Verify the service is no longer alive
+    ?assertEqual(false, is_process_alive(ServicePid)),
+    
+    %% Verify deregistration works (service deregistered during terminate)
+    ?assertEqual({error, no_service_available}, sofia_registry:discover(ServiceType)).

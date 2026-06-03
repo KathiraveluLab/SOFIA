@@ -4,7 +4,10 @@ This tutorial guides you through the practical steps to build, register, invoke,
 
 ## 1. Creating and Registering a Service
 
-To participate in the SOFIA federation, a service runs as an Erlang process and registers itself with `sofia_registry`. 
+To participate in the SOFIA federation, a service runs as an Erlang process and registers itself with `sofia_registry`.
+
+> [!TIP]
+> A complete, compileable service template is provided in [sofia_service_skeleton.erl](file:///home/pradeeban/SOFIA/src/core/sofia_service_skeleton.erl). Developers can copy and extend this skeleton to implement their custom services.
 
 Below is an example of a simple calculator service (`calc_service.erl`) implemented using the standard Erlang `gen_server` behavior:
 
@@ -52,6 +55,9 @@ code_change(_OldVsn, State, _Extra) ->
 ## 2. Invoking a Service with Circuit Breaker Protection
 
 When calling external or distributed services, use `sofia_breaker:call/2` (or `sofia_breaker:call/3` with options) to prevent cascading failures.
+
+> [!TIP]
+> A reusable service client stub is provided in [sofia_client_stub.erl](file:///home/pradeeban/SOFIA/src/core/sofia_client_stub.erl). Developers can use or extend this client stub to invoke SOFIA services with built-in circuit breaker protection.
 
 Here is how a client discovers the calculator service and invokes it safely:
 

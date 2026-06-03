@@ -53,6 +53,19 @@ translate_payload(Payload) ->
 %% ===================================================================
 
 init([]) ->
+    Port = case application:get_env(sofia, gateway_port) of
+        {ok, P} -> P;
+        undefined -> 8080
+    end,
+    Dispatch = cowboy_router:compile([
+        {'_', [
+            {"/api/v1/service/:service_name", sofia_http_handler, []}
+        ]}
+    ]),
+    {ok, _} = cowboy:start_clear(sofia_http_listener,
+        [{port, Port}],
+        #{env => #{dispatch => Dispatch}}
+    ),
     {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
@@ -65,6 +78,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    ok = cowboy:stop_listener(sofia_http_listener),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

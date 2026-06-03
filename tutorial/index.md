@@ -24,3 +24,6 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
 
 7. **[Chapter 7: Self-Describing Federated Services](07_self_describing_services.md)**
    Implement service contract registry mappings and perform client-side schema verification prior to actor invocation.
+
+8. **[Chapter 8: External Edge Gateway with Cowboy](08_external_edge_gateway.md)**
+   Expose federated services externally via HTTP/JSON API endpoints, complete with dynamic schema validation and error mapping.

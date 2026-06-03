@@ -5,7 +5,9 @@
     {mod, {sofia_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        cowboy,
+        jsx
     ]},
     {env, []},
     {modules, []},

@@ -24,7 +24,7 @@ validate_schema(Schema, Payload) ->
     maps:fold(fun(Key, ExpectedType, Acc) ->
         case Acc of
             ok ->
-                case maps:find(Key, Payload) of
+                case find_payload_value(Key, Payload) of
                     {ok, Value} ->
                         case check_type(Value, ExpectedType) of
                             true -> ok;
@@ -37,6 +37,16 @@ validate_schema(Schema, Payload) ->
                 Err
         end
     end, ok, Schema).
+
+find_payload_value(Key, Payload) when is_atom(Key) ->
+    case maps:find(Key, Payload) of
+        {ok, V} -> {ok, V};
+        error ->
+            BinKey = atom_to_binary(Key, utf8),
+            maps:find(BinKey, Payload)
+    end;
+find_payload_value(Key, Payload) ->
+    maps:find(Key, Payload).
 
 check_type(Value, integer) -> is_integer(Value);
 check_type(Value, float) -> is_float(Value);

@@ -11,7 +11,8 @@ sofia_integration_test_() ->
       fun test_transformer/0,
       fun test_saga/0,
       fun test_skeleton_and_stub/0,
-      fun test_healthcare_finance_interconnection/0
+      fun test_healthcare_finance_interconnection/0,
+      fun test_http_gateway/0
      ]}.
 
 setup() ->
@@ -223,3 +224,69 @@ test_healthcare_finance_interconnection() ->
 
     ProcessorPid ! stop,
     ok = sofia_registry:deregister_service(payment_processor, ProcessorPid).
+
+test_http_gateway() ->
+    ok = application:ensure_started(inets),
+    
+    Contract = #{
+        methods => #{
+            add => #{
+                input_schema => #{
+                    a => integer,
+                    b => integer
+                }
+            }
+        }
+    },
+    
+    MockPid = spawn(fun L() ->
+        receive
+            {'$gen_call', From, {add, Payload}} ->
+                A = maps:get(a, Payload),
+                B = maps:get(b, Payload),
+                gen_server:reply(From, {ok, A + B}),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(http_calc_service, MockPid, Contract),
+    
+    timer:sleep(50),
+    
+    %% 1. Make a valid POST request to the Cowboy Edge Gateway
+    ValidBody = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 10, <<"b">> => 20}}),
+    {ok, {{_Version, 200, _}, _Headers, ResponseBody}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/http_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", ValidBody}, [], []),
+                             
+    Decoded = jsx:decode(list_to_binary(ResponseBody), [return_maps]),
+    ?assertEqual(#{<<"status">> => <<"success">>, <<"result">> => 30}, Decoded),
+    
+    %% 2. Make an invalid POST request violating schema parameters (missing 'b')
+    InvalidBody1 = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 10}}),
+    {ok, {{_, 400, _}, _, ResponseBody2}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/http_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", InvalidBody1}, [], []),
+                             
+    Decoded2 = jsx:decode(list_to_binary(ResponseBody2), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded2)),
+    ?assertEqual(<<"contract_validation_failed">>, maps:get(<<"reason">>, Decoded2)),
+    
+    %% 3. Make an invalid POST request violating schema types ('b' is not an integer)
+    InvalidBody2 = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 10, <<"b">> => <<"not_int">>}}),
+    {ok, {{_, 400, _}, _, ResponseBody3}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/http_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", InvalidBody2}, [], []),
+                             
+    Decoded3 = jsx:decode(list_to_binary(ResponseBody3), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded3)),
+    ?assertEqual(<<"contract_validation_failed">>, maps:get(<<"reason">>, Decoded3)),
+    
+    %% Clean up
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(http_calc_service, MockPid),
+    ok = application:stop(inets).

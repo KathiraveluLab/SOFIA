@@ -19,7 +19,8 @@ sofia_integration_test_() ->
       fun test_backpressure/0,
       fun test_saga_recovery/0,
       fun test_qos_routing/0,
-      fun test_rate_limiter/0
+      fun test_rate_limiter/0,
+      fun test_dlq/0
      ]}.
 
 setup() ->
@@ -584,4 +585,57 @@ test_rate_limiter() ->
     %% Clear SLA record from Mnesia
     F = fun() -> mnesia:delete({sofia_slas, <<"test_client">>}) end,
     mnesia:transaction(F).
+
+test_dlq() ->
+    ok = application:ensure_started(inets),
+
+    %% Step 1: Purge any pre-existing DLQ entries
+    ok = sofia_dlq:purge(),
+    {ok, []} = sofia_dlq:list(),
+
+    %% Step 2: Register a service with a strict schema contract
+    Contract = #{methods => #{add => #{input_schema => #{a => integer, b => integer}}}},
+    MockPid = spawn(fun L() ->
+        receive
+            {'$gen_call', From, {add, Payload}} ->
+                A = maps:get(a, Payload), B = maps:get(b, Payload),
+                gen_server:reply(From, {ok, A + B}), L();
+            stop -> ok
+        end
+    end),
+    ok = sofia_registry:register_service(dlq_calc_service, MockPid, Contract),
+    timer:sleep(50),
+
+    %% Step 3: Send a request with a type-violating payload (b is not an integer)
+    BadBody = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 5, <<"b">> => <<"not_int">>}}),
+    {ok, {{_, 400, _}, _, _}} =
+        httpc:request(post, {"http://localhost:8080/api/v1/service/dlq_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", BadBody}, [], []),
+
+    %% Step 4: Send a request with a missing parameter (b is absent)
+    MissingBody = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 5}}),
+    {ok, {{_, 400, _}, _, _}} =
+        httpc:request(post, {"http://localhost:8080/api/v1/service/dlq_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", MissingBody}, [], []),
+
+    %% Step 5: DLQ should now have exactly 2 entries for dlq_calc_service
+    {ok, AllEntries} = sofia_dlq:list(dlq_calc_service),
+    ?assertEqual(2, length(AllEntries)),
+
+    %% Step 6: Verify each entry has the expected fields
+    [Entry | _] = AllEntries,
+    ?assert(maps:is_key(entry_id, Entry)),
+    ?assert(maps:is_key(timestamp, Entry)),
+    ?assertEqual(dlq_calc_service, maps:get(service, Entry)),
+
+    %% Step 7: Purge and confirm empty
+    ok = sofia_dlq:purge(),
+    {ok, []} = sofia_dlq:list(dlq_calc_service),
+
+    %% Cleanup
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(dlq_calc_service, MockPid),
+    ok = application:stop(inets).
 

@@ -85,6 +85,12 @@ init([]) ->
             start => {sofia_rate_limiter, start_link, []},
             restart => permanent,
             type => worker
+        },
+        #{
+            id => sofia_dlq,
+            start => {sofia_dlq, start_link, []},
+            restart => permanent,
+            type => worker
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

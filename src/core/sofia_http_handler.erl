@@ -20,6 +20,7 @@ handle_request(<<"POST">>, true, Req) ->
     
     case sofia_rate_limiter:check_rate(LimiterClientId) of
         {error, rate_limited} ->
+            sofia_dlq:enqueue(ServiceAtom, rate_limited, <<>>, LimiterClientId),
             send_response(429, #{
                 status => <<"error">>,
                 reason => <<"rate_limited">>,
@@ -46,6 +47,7 @@ handle_request(<<"POST">>, true, Req) ->
                                         ok ->
                                             process_body(ServiceAtom, Body, Req2);
                                         {error, AuthReason} ->
+                                            sofia_dlq:enqueue(ServiceAtom, {auth_failure, AuthReason}, Body, CI),
                                             send_response(403, #{
                                                 status => <<"error">>,
                                                 reason => <<"forbidden">>,
@@ -103,12 +105,14 @@ process_body(ServiceAtom, Body, Req2) ->
             {ok, Reply} ->
                 send_response(200, #{status => <<"success">>, result => Reply}, Req2);
             {error, overloaded} ->
+                sofia_dlq:enqueue(ServiceAtom, overloaded, Body, <<"system">>),
                 send_response(503, #{
                     status => <<"error">>,
                     reason => <<"overloaded">>,
                     details => <<"Service mailbox queue limit exceeded.">>
                 }, Req2);
             {error, {contract_validation_failed, ValError}} ->
+                sofia_dlq:enqueue(ServiceAtom, {contract_validation_failed, ValError}, Body, <<"system">>),
                 send_response(400, #{
                     status => <<"error">>, 
                     reason => <<"contract_validation_failed">>, 
@@ -122,6 +126,7 @@ process_body(ServiceAtom, Body, Req2) ->
         end
     catch
         _:Err ->
+            sofia_dlq:enqueue(ServiceAtom, invalid_json, Body, <<"system">>),
             send_response(400, #{
                 status => <<"error">>, 
                 reason => <<"invalid_json">>, 

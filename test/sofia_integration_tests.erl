@@ -12,7 +12,8 @@ sofia_integration_test_() ->
       fun test_saga/0,
       fun test_skeleton_and_stub/0,
       fun test_healthcare_finance_interconnection/0,
-      fun test_http_gateway/0
+      fun test_http_gateway/0,
+      fun test_http_gateway_auth/0
      ]}.
 
 setup() ->
@@ -289,4 +290,84 @@ test_http_gateway() ->
     %% Clean up
     MockPid ! stop,
     ok = sofia_registry:deregister_service(http_calc_service, MockPid),
+    ok = application:stop(inets).
+
+test_http_gateway_auth() ->
+    ok = application:ensure_started(inets),
+    
+    %% Set client secret in the auth database
+    ok = sofia_auth:set_client_secret(<<"client_123">>, <<"super_secret_key">>),
+    
+    Contract = #{
+        security => hmac,
+        methods => #{
+            add => #{
+                input_schema => #{
+                    a => integer,
+                    b => integer
+                }
+            }
+        }
+    },
+    
+    MockPid = spawn(fun L() ->
+        receive
+            {'$gen_call', From, {add, Payload}} ->
+                A = maps:get(a, Payload),
+                B = maps:get(b, Payload),
+                gen_server:reply(From, {ok, A + B}),
+                L();
+            stop -> ok
+        end
+    end),
+    
+    ok = sofia_registry:register_service(secure_calc_service, MockPid, Contract),
+    
+    timer:sleep(50),
+    
+    ValidBody = jsx:encode(#{<<"method">> => <<"add">>, <<"payload">> => #{<<"a">> => 10, <<"b">> => 20}}),
+    
+    %% 1. Make an unauthenticated request (expecting 401 Unauthorized)
+    {ok, {{_Version, 401, _}, _Headers1, ResponseBody1}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/secure_calc_service",
+                             [{"content-type", "application/json"}],
+                             "application/json", ValidBody}, [], []),
+                             
+    Decoded1 = jsx:decode(list_to_binary(ResponseBody1), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded1)),
+    ?assertEqual(<<"missing_auth_headers">>, maps:get(<<"reason">>, Decoded1)),
+    
+    %% 2. Make an request with invalid signature (expecting 403 Forbidden)
+    CurrentTimestamp = integer_to_binary(erlang:system_time(second)),
+    {ok, {{_, 403, _}, _, ResponseBody2}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/secure_calc_service",
+                             [{"content-type", "application/json"},
+                              {"x-sofia-client-id", "client_123"},
+                              {"x-sofia-signature", "invalid_sig_here"},
+                              {"x-sofia-timestamp", binary_to_list(CurrentTimestamp)}],
+                             "application/json", ValidBody}, [], []),
+                             
+    Decoded2 = jsx:decode(list_to_binary(ResponseBody2), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded2)),
+    ?assertEqual(<<"forbidden">>, maps:get(<<"reason">>, Decoded2)),
+    ?assertEqual(<<"invalid_signature">>, maps:get(<<"details">>, Decoded2)),
+    
+    %% 3. Make a valid signed request (expecting 200 OK)
+    Timestamp = integer_to_binary(erlang:system_time(second)),
+    {ok, SignatureHex} = sofia_auth:sign_payload(<<"client_123">>, Timestamp, ValidBody),
+    
+    {ok, {{_, 200, _}, _, ResponseBody3}} = 
+        httpc:request(post, {"http://localhost:8080/api/v1/service/secure_calc_service",
+                             [{"content-type", "application/json"},
+                              {"x-sofia-client-id", "client_123"},
+                              {"x-sofia-signature", binary_to_list(SignatureHex)},
+                              {"x-sofia-timestamp", binary_to_list(Timestamp)}],
+                             "application/json", ValidBody}, [], []),
+                             
+    Decoded3 = jsx:decode(list_to_binary(ResponseBody3), [return_maps]),
+    ?assertEqual(#{<<"status">> => <<"success">>, <<"result">> => 30}, Decoded3),
+    
+    %% Clean up
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(secure_calc_service, MockPid),
     ok = application:stop(inets).

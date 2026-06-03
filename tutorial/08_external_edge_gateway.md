@@ -140,3 +140,101 @@ curl -X POST http://localhost:8080/api/v1/service/calc_service \
   "details": "Type mismatch for b. Expected integer, got <<\"invalid_type\">>"
 }
 ```
+
+---
+
+## 6. Federated Cryptographic Access Control
+
+SOFIA supports robust federated authentication and access control through **HMAC-SHA256 request signatures** and **replay attack protection**.
+
+### Enforcing Security in Service Contracts
+To require authentication for a service, specify `security => hmac` in the service's registered contract:
+
+```erlang
+Contract = #{
+    security => hmac,
+    methods => #{
+        add => #{
+            input_schema => #{
+                a => integer,
+                b => integer
+            }
+        }
+    }
+}.
+```
+
+### Authentication Protocol
+When a service is marked secure, the gateway intercepts requests and expects the following HTTP headers:
+1. `X-Sofia-Client-Id`: A unique identifier for the calling client.
+2. `X-Sofia-Timestamp`: Unix epoch timestamp representing when the request was constructed.
+3. `X-Sofia-Signature`: HMAC-SHA256 signature represented in hex, computed as:
+   `HMAC_SHA256(Secret, ClientId ++ "." ++ Timestamp ++ "." ++ Body)`
+
+### Replay Attack Prevention
+The gateway computes the difference between the current system time and the timestamp in the `X-Sofia-Timestamp` header. If the skew exceeds `300 seconds` (5 minutes), the request is rejected with `403 Forbidden` (`replay_or_skewed_clock`).
+
+### API Examples for Secure Services
+
+#### Example A: Missing Authentication Headers (401 Unauthorized)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/service/secure_service \
+  -H "Content-Type: application/json" \
+  -d '{"method": "add", "payload": {"a": 10, "b": 20}}'
+```
+
+**Response:**
+```json
+{
+  "status": "error",
+  "reason": "missing_auth_headers"
+}
+```
+
+#### Example B: Invalid Signature (403 Forbidden)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/service/secure_service \
+  -H "Content-Type: application/json" \
+  -H "X-Sofia-Client-Id: client_123" \
+  -H "X-Sofia-Signature: invalid_signature" \
+  -H "X-Sofia-Timestamp: 1717366400" \
+  -d '{"method": "add", "payload": {"a": 10, "b": 20}}'
+```
+
+**Response:**
+```json
+{
+  "status": "error",
+  "reason": "forbidden",
+  "details": "invalid_signature"
+}
+```
+
+#### Example C: Valid Authenticated Call (200 OK)
+
+Compute the signature on the client:
+```erlang
+Timestamp = integer_to_binary(erlang:system_time(second)),
+{ok, SignatureHex} = sofia_auth:sign_payload(<<"client_123">>, Timestamp, Body).
+```
+
+Include the headers:
+```bash
+curl -X POST http://localhost:8080/api/v1/service/secure_service \
+  -H "Content-Type: application/json" \
+  -H "X-Sofia-Client-Id: client_123" \
+  -H "X-Sofia-Signature: 6e9d8e7b..." \
+  -H "X-Sofia-Timestamp: 1717366400" \
+  -d '{"method": "add", "payload": {"a": 10, "b": 20}}'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "result": 30
+}
+```
+

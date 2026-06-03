@@ -15,7 +15,7 @@ SOFIA is a lightweight, Erlang-based framework designed for building scalable, f
 
 ## Self-Describing Federated Services
 
-SOFIA supports self-describing services, offering a decentralized alternative to traditional IDLs like OpenAPI/Swagger or gRPC protocol buffers. Service providers register metadata contracts detailing schemas directly with `sofia_registry`. Client stubs retrieve these contracts and validate request payloads locally prior to invocation:
+SOFIA supports self-describing services, offering a decentralized alternative to traditional Interface Definition Languages (IDLs) like OpenAPI/Swagger or gRPC protocol buffers. Service providers register metadata contracts detailing schemas directly with `sofia_registry`. Client stubs retrieve these contracts and validate request payloads locally prior to invocation:
 
 ```mermaid
 sequenceDiagram

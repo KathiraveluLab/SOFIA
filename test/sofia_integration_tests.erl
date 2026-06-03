@@ -14,7 +14,8 @@ sofia_integration_test_() ->
       fun test_healthcare_finance_interconnection/0,
       fun test_http_gateway/0,
       fun test_http_gateway_auth/0,
-      fun test_http_gateway_openapi/0
+      fun test_http_gateway_openapi/0,
+      fun test_backpressure/0
      ]}.
 
 setup() ->
@@ -81,6 +82,41 @@ test_router() ->
     
     ok = sofia_registry:deregister_service(mock_routed, Server1),
     ok = sofia_registry:deregister_service(mock_routed, Server2).
+
+test_backpressure() ->
+    %% Configure mailbox limit to 5 for testing purposes
+    application:set_env(sofia, max_mailbox_size, 5),
+    
+    %% Start a mock service that only processes '$gen_call' pings
+    IdlePid = spawn(fun Loop() ->
+        receive
+            {'$gen_call', From, ping} ->
+                gen_server:reply(From, pong),
+                Loop()
+        end
+    end),
+    ok = sofia_registry:register_service(backpressured_service, IdlePid),
+    
+    ?assertEqual(pong, sofia_client_stub:call_service(backpressured_service, ping)),
+    
+    %% Send 10 messages directly to the process's mailbox to exceed limit (5)
+    [IdlePid ! {dummy, N} || N <- lists:seq(1, 10)],
+    
+    %% Check that calls through client stub, gateway, and router are rejected
+    ?assertEqual({error, overloaded}, sofia_client_stub:call_service(backpressured_service, ping)),
+    
+    ?assertEqual({error, overloaded}, sofia_gateway:handle_request(backpressured_service, #{<<"action">> => <<"add">>, <<"args">> => [1, 2]}, test_breaker)),
+    
+    %% Route dynamic request: router should return {error, overloaded} since the only registered Pid is overloaded
+    RouteFun = fun(_Payload, Pids) -> {ok, hd(Pids)} end,
+    ?assertEqual({error, overloaded}, sofia_router:route(backpressured_service, dummy_payload, RouteFun)),
+    
+    %% Clean up
+    ok = sofia_registry:deregister_service(backpressured_service, IdlePid),
+    exit(IdlePid, kill),
+    
+    %% Reset mailbox limit to default (100)
+    application:set_env(sofia, max_mailbox_size, 100).
 
 test_transformer() ->
     %% Test map-based key renaming

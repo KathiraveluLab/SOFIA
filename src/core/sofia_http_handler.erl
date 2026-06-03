@@ -89,6 +89,12 @@ process_body(ServiceAtom, Body, Req2) ->
         case Result of
             {ok, Reply} ->
                 send_response(200, #{status => <<"success">>, result => Reply}, Req2);
+            {error, overloaded} ->
+                send_response(503, #{
+                    status => <<"error">>,
+                    reason => <<"overloaded">>,
+                    details => <<"Service mailbox queue limit exceeded.">>
+                }, Req2);
             {error, {contract_validation_failed, ValError}} ->
                 send_response(400, #{
                     status => <<"error">>, 

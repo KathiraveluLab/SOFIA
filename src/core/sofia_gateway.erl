@@ -23,10 +23,18 @@ start_link() ->
 handle_request(ServiceType, ExternalPayload, BreakerId) ->
     case sofia_registry:discover(ServiceType) of
         {ok, Pid} ->
-            %% Perform protocol translation / bridging: convert Map payload to native Erlang record or tuple
-            NativeMsg = translate_payload(ExternalPayload),
-            %% Call with circuit breaker protection
-            sofia_breaker:call(BreakerId, fun() -> gen_server:call(Pid, NativeMsg) end);
+            MaxQueueLen = application:get_env(sofia, max_mailbox_size, 100),
+            case erlang:process_info(Pid, message_queue_len) of
+                {message_queue_len, Len} when Len > MaxQueueLen ->
+                    {error, overloaded};
+                undefined ->
+                    {error, service_dead};
+                _ ->
+                    %% Perform protocol translation / bridging: convert Map payload to native Erlang record or tuple
+                    NativeMsg = translate_payload(ExternalPayload),
+                    %% Call with circuit breaker protection
+                    sofia_breaker:call(BreakerId, fun() -> gen_server:call(Pid, NativeMsg) end)
+            end;
         {error, Reason} ->
             {error, {gateway_discovery_failed, Reason}}
     end.

@@ -36,32 +36,40 @@ call_service(ServiceType, Request, BreakerOpts) ->
         {error, Reason} ->
             {error, {service_discovery_failed, Reason}};
         {ok, ServicePid} ->
-            %% 2. Define the invocation function
-            InvocationFun = fun() ->
-                gen_server:call(ServicePid, Request)
-            end,
-            
-            %% 3. Generate a circuit breaker ID specific to the service type
-            BreakerId = list_to_atom(atom_to_list(ServiceType) ++ "_breaker"),
-            
-            %% 4. Verify contract validation if a contract is registered
-            case sofia_registry:get_contract(ServiceType) of
-                {ok, Contract} ->
-                    case Request of
-                        {Method, Payload} when is_map(Payload) ->
-                            case sofia_contract:validate_request(Contract, Method, Payload) of
-                                ok ->
-                                    sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts);
-                                {error, ValReason} ->
-                                    {error, {contract_validation_failed, ValReason}}
+            MaxQueueLen = application:get_env(sofia, max_mailbox_size, 100),
+            case erlang:process_info(ServicePid, message_queue_len) of
+                {message_queue_len, Len} when Len > MaxQueueLen ->
+                    {error, overloaded};
+                undefined ->
+                    {error, service_dead};
+                _ ->
+                    %% 2. Define the invocation function
+                    InvocationFun = fun() ->
+                        gen_server:call(ServicePid, Request)
+                    end,
+                    
+                    %% 3. Generate a circuit breaker ID specific to the service type
+                    BreakerId = list_to_atom(atom_to_list(ServiceType) ++ "_breaker"),
+                    
+                    %% 4. Verify contract validation if a contract is registered
+                    case sofia_registry:get_contract(ServiceType) of
+                        {ok, Contract} ->
+                            case Request of
+                                {Method, Payload} when is_map(Payload) ->
+                                    case sofia_contract:validate_request(Contract, Method, Payload) of
+                                        ok ->
+                                            sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts);
+                                        {error, ValReason} ->
+                                            {error, {contract_validation_failed, ValReason}}
+                                    end;
+                                _ ->
+                                    %% Bypass validation if not a schema-compatible request structure
+                                    sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
                             end;
-                        _ ->
-                            %% Bypass validation if not a schema-compatible request structure
+                        {error, no_contract} ->
+                            %% No contract registered, bypass validation
                             sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
-                    end;
-                {error, no_contract} ->
-                    %% No contract registered, bypass validation
-                    sofia_breaker:call(BreakerId, InvocationFun, BreakerOpts)
+                    end
             end
     end.
 

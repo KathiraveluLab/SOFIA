@@ -24,12 +24,25 @@ route(ServiceType, Payload, RoutingKeyFun) ->
         [] ->
             {error, no_service_available};
         Pids ->
-            %% Apply the dynamic routing criteria to choose a specific Pid
-            case RoutingKeyFun(Payload, Pids) of
-                {ok, SelectedPid} ->
-                    {ok, SelectedPid};
-                {error, Reason} ->
-                    {error, {routing_failed, Reason}}
+            MaxQueueLen = application:get_env(sofia, max_mailbox_size, 100),
+            HealthyPids = lists:filter(fun(Pid) ->
+                case erlang:process_info(Pid, message_queue_len) of
+                    {message_queue_len, Len} when Len > MaxQueueLen -> false;
+                    undefined -> false;
+                    _ -> true
+                end
+            end, Pids),
+            case HealthyPids of
+                [] ->
+                    {error, overloaded};
+                _ ->
+                    %% Apply the dynamic routing criteria to choose a specific Pid
+                    case RoutingKeyFun(Payload, HealthyPids) of
+                        {ok, SelectedPid} ->
+                            {ok, SelectedPid};
+                        {error, Reason} ->
+                            {error, {routing_failed, Reason}}
+                    end
             end
     end.
 

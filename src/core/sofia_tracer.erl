@@ -9,6 +9,7 @@
     trace_id :: binary(),
     parent_span_id :: binary() | undefined,
     name :: atom() | string(),
+    node :: node(),
     start_time :: integer(), %% microseconds
     end_time :: integer() | undefined,
     duration :: integer() | undefined %% microseconds
@@ -28,6 +29,7 @@ start_span(TraceId, SpanId, Name, ParentSpanId) ->
         trace_id = TraceId,
         parent_span_id = ParentSpanId,
         name = Name,
+        node = node(),
         start_time = StartTime
     },
     gen_server:call(?MODULE, {start_span, Span}),
@@ -85,6 +87,7 @@ handle_call({get_trace, TraceId}, _From, State) ->
         span_id => S#span.span_id,
         parent_span_id => S#span.parent_span_id,
         name => S#span.name,
+        node => S#span.node,
         start_time => S#span.start_time,
         end_time => S#span.end_time,
         duration => S#span.duration

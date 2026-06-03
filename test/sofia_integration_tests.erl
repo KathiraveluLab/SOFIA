@@ -17,7 +17,8 @@ sofia_integration_test_() ->
       fun test_http_gateway_auth/0,
       fun test_http_gateway_openapi/0,
       fun test_backpressure/0,
-      fun test_saga_recovery/0
+      fun test_saga_recovery/0,
+      fun test_qos_routing/0
      ]}.
 
 setup() ->
@@ -493,4 +494,34 @@ test_saga_recovery() ->
     ?assertEqual(rolled_back, element(3, UpdatedRecord)),
     
     ets:delete(Table).
+
+test_qos_routing() ->
+    QosServer1 = spawn(fun() -> receive hold -> ok end end),
+    QosServer2 = spawn(fun() -> receive hold -> ok end end),
+    
+    ok = sofia_registry:register_service(qos_service, QosServer1),
+    ok = sofia_registry:register_service(qos_service, QosServer2),
+    
+    %% Send 3 unmatched messages to QosServer1 to increase its mailbox queue length
+    QosServer1 ! dummy1,
+    QosServer1 ! dummy2,
+    QosServer1 ! dummy3,
+    
+    %% Route: RouteFun simply returns the first Pid in the list
+    RouteFun = fun(_, SortedPids) -> {ok, hd(SortedPids)} end,
+    
+    %% The router should rank QosServer2 first because it has a shorter mailbox queue
+    ?assertEqual({ok, QosServer2}, sofia_router:route(qos_service, test_payload, RouteFun)),
+    
+    %% Simulate an open circuit breaker on our local node for qos_service
+    %% sofia_breakers_table is named_table
+    ets:insert(sofia_breakers_table, {qos_service, open, 3, erlang:system_time(millisecond)}),
+    ?assertEqual({error, overloaded}, sofia_router:route(qos_service, test_payload, RouteFun)),
+    
+    %% Clean up
+    ets:delete(sofia_breakers_table, qos_service),
+    ok = sofia_registry:deregister_service(qos_service, QosServer1),
+    ok = sofia_registry:deregister_service(qos_service, QosServer2),
+    exit(QosServer1, kill),
+    exit(QosServer2, kill).
 

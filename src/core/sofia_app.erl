@@ -29,7 +29,7 @@ init_mnesia() ->
     end,
     Tables = [
         {sofia_client_secrets, [client_id, secret]},
-        {span, [span_id, trace_id, parent_span_id, name, start_time, end_time, duration]},
+        {span, [span_id, trace_id, parent_span_id, name, node, start_time, end_time, duration]},
         {sofia_sagas, [saga_id, status, completed_steps, total_steps, steps]}
     ],
     lists:foreach(fun({Name, Attrs}) ->

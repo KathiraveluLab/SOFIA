@@ -30,7 +30,8 @@ init_mnesia() ->
     Tables = [
         {sofia_client_secrets, [client_id, secret]},
         {span, [span_id, trace_id, parent_span_id, name, node, start_time, end_time, duration]},
-        {sofia_sagas, [saga_id, status, completed_steps, total_steps, steps]}
+        {sofia_sagas, [saga_id, status, completed_steps, total_steps, steps]},
+        {sofia_service_metadata, [pid, service_type, metadata]}
     ],
     lists:foreach(fun({Name, Attrs}) ->
         case mnesia:create_table(Name, [{disc_copies, [node()]}, {attributes, Attrs}, {type, set}]) of
@@ -42,4 +43,4 @@ init_mnesia() ->
             _Other -> ok
         end
     end, Tables),
-    mnesia:wait_for_tables([sofia_client_secrets, span, sofia_sagas], 5000).
+    mnesia:wait_for_tables([sofia_client_secrets, span, sofia_sagas, sofia_service_metadata], 5000).

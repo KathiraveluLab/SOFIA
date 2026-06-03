@@ -39,7 +39,37 @@ test_registry() ->
     
     %% Deregister service
     ?assertEqual(ok, sofia_registry:deregister_service(my_dummy_service, DummyPid)),
-    ?assertEqual({error, no_service_available}, sofia_registry:discover(my_dummy_service)).
+    ?assertEqual({error, no_service_available}, sofia_registry:discover(my_dummy_service)),
+    
+    %% Test metadata registration and discovery
+    Metadata1 = #{<<"region">> => <<"us-east">>, <<"version">> => <<"1.0.0">>},
+    Metadata2 = #{<<"region">> => <<"us-west">>, <<"version">> => <<"1.0.0">>},
+    
+    Pid1 = spawn(fun L() -> receive _ -> L() end end),
+    Pid2 = spawn(fun L() -> receive _ -> L() end end),
+    
+    ?assertEqual(ok, sofia_registry:register_service(meta_service, Pid1, #{}, Metadata1)),
+    ?assertEqual(ok, sofia_registry:register_service(meta_service, Pid2, #{}, Metadata2)),
+    
+    %% Query by metadata
+    ?assertEqual({ok, Pid1}, sofia_registry:discover_by_metadata(meta_service, #{<<"region">> => <<"us-east">>})),
+    ?assertEqual({ok, Pid2}, sofia_registry:discover_by_metadata(meta_service, #{<<"region">> => <<"us-west">>})),
+    ?assertEqual({ok, Pid1}, sofia_registry:discover_by_metadata(meta_service, #{<<"version">> => <<"1.0.0">>, <<"region">> => <<"us-east">>})),
+    
+    %% No matching metadata
+    ?assertEqual({error, no_service_available}, sofia_registry:discover_by_metadata(meta_service, #{<<"region">> => <<"eu-central">>})),
+    
+    %% Test self-healing auto-deregistration on process DOWN
+    exit(Pid1, kill),
+    timer:sleep(50), %% allow monitor DOWN message to be processed
+    
+    ?assertEqual({error, no_service_available}, sofia_registry:discover_by_metadata(meta_service, #{<<"region">> => <<"us-east">>})),
+    %% Pid2 should still be discoverable
+    ?assertEqual({ok, Pid2}, sofia_registry:discover_by_metadata(meta_service, #{<<"region">> => <<"us-west">>})),
+    
+    %% Cleanup Pid2
+    ok = sofia_registry:deregister_service(meta_service, Pid2),
+    exit(Pid2, kill).
 
 test_breaker() ->
     Service = test_service,

@@ -13,7 +13,8 @@ sofia_integration_test_() ->
       fun test_skeleton_and_stub/0,
       fun test_healthcare_finance_interconnection/0,
       fun test_http_gateway/0,
-      fun test_http_gateway_auth/0
+      fun test_http_gateway_auth/0,
+      fun test_http_gateway_openapi/0
      ]}.
 
 setup() ->
@@ -371,3 +372,49 @@ test_http_gateway_auth() ->
     MockPid ! stop,
     ok = sofia_registry:deregister_service(secure_calc_service, MockPid),
     ok = application:stop(inets).
+
+test_http_gateway_openapi() ->
+    ok = application:ensure_started(inets),
+    Contract = #{
+        version => <<"1.2.3">>,
+        methods => #{
+            add => #{
+                input_schema => #{
+                    a => integer,
+                    b => integer
+                }
+            }
+        }
+    },
+    MockPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = sofia_registry:register_service(openapi_test_service, MockPid, Contract),
+    timer:sleep(50),
+    
+    %% Make a GET request to obtain the dynamic OpenAPI spec
+    {ok, {{_Version, 200, _}, _Headers, ResponseBody}} = 
+        httpc:request(get, {"http://localhost:8080/api/v1/service/openapi_test_service", []}, [], []),
+    
+    Decoded = jsx:decode(list_to_binary(ResponseBody), [return_maps]),
+    ?assertEqual(<<"3.0.0">>, maps:get(<<"openapi">>, Decoded)),
+    Info = maps:get(<<"info">>, Decoded),
+    ?assertEqual(<<"openapi_test_service">>, maps:get(<<"title">>, Info)),
+    ?assertEqual(<<"1.2.3">>, maps:get(<<"version">>, Info)),
+    
+    Paths = maps:get(<<"paths">>, Decoded),
+    ?assert(maps:is_key(<<"/services/openapi_test_service">>, Paths)),
+    
+    %% Test 404 response for unregistered service
+    {ok, {{_, 404, _}, _, ResponseBody2}} = 
+        httpc:request(get, {"http://localhost:8080/api/v1/service/non_existent_contract_service", []}, [], []),
+    Decoded2 = jsx:decode(list_to_binary(ResponseBody2), [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"status">>, Decoded2)),
+    ?assertEqual(<<"no_contract_registered">>, maps:get(<<"reason">>, Decoded2)),
+    
+    MockPid ! stop,
+    ok = sofia_registry:deregister_service(openapi_test_service, MockPid),
+    ok = application:stop(inets).
+

@@ -52,6 +52,19 @@ handle_request(<<"POST">>, true, Req) ->
                     send_response(500, #{status => <<"error">>, reason => <<"failed_to_read_body">>, details => format_reason(Reason)}, Req2)
             end
     end;
+handle_request(<<"GET">>, _, Req) ->
+    ServiceNameBin = cowboy_req:binding(service_name, Req),
+    ServiceAtom = list_to_atom(binary_to_list(ServiceNameBin)),
+    case sofia_registry:get_contract(ServiceAtom) of
+        {ok, Contract} ->
+            OpenApiSpec = to_openapi(ServiceAtom, Contract),
+            send_response(200, OpenApiSpec, Req);
+        {error, no_contract} ->
+            send_response(404, #{
+                status => <<"error">>,
+                reason => <<"no_contract_registered">>
+            }, Req)
+    end;
 handle_request(_, _, Req) ->
     send_response(405, #{status => <<"error">>, reason => <<"method_not_allowed">>}, Req).
 
@@ -135,3 +148,54 @@ normalize_keys(Map) when is_map(Map) ->
         maps:put(NewKey, NewVal, Acc)
     end, #{}, Map);
 normalize_keys(Other) -> Other.
+
+to_openapi(ServiceName, Contract) ->
+    Version = maps:get(version, Contract, <<"1.0.0">>),
+    Methods = maps:get(methods, Contract, #{}),
+    Paths = #{
+        list_to_binary("/services/" ++ atom_to_list(ServiceName)) => #{
+            <<"post">> => #{
+                <<"summary">> => list_to_binary("Invoke method on " ++ atom_to_list(ServiceName)),
+                <<"requestBody">> => #{
+                    <<"required">> => true,
+                    <<"content">> => #{
+                        <<"application/json">> => #{
+                            <<"schema">> => #{
+                                <<"type">> => <<"object">>,
+                                <<"required">> => [<<"method">>, <<"payload">>],
+                                <<"properties">> => #{
+                                    <<"method">> => #{
+                                        <<"type">> => <<"string">>,
+                                        <<"enum">> => [atom_to_binary(M, utf8) || M <- maps:keys(Methods)]
+                                    },
+                                    <<"payload">> => #{
+                                        <<"type">> => <<"object">>
+                                    }
+                                }
+                              }
+                          }
+                      }
+                  },
+                  <<"responses">> => #{
+                      <<"200">> => #{
+                          <<"description">> => <<"Successful invocation">>
+                      },
+                      <<"400">> => #{
+                          <<"description">> => <<"Invalid JSON or contract validation failed">>
+                      },
+                      <<"500">> => #{
+                          <<"description">> => <<"Internal server error">>
+                      }
+                  }
+              }
+          }
+      },
+      #{
+          <<"openapi">> => <<"3.0.0">>,
+          <<"info">> => #{
+              <<"title">> => atom_to_binary(ServiceName, utf8),
+              <<"version">> => if is_binary(Version) -> Version; true -> list_to_binary(io_lib:format("~p", [Version])) end
+          },
+          <<"paths">> => Paths
+      }.
+

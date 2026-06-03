@@ -238,3 +238,77 @@ curl -X POST http://localhost:8080/api/v1/service/secure_service \
 }
 ```
 
+---
+
+## 7. Dynamic OpenAPI Schema Generation (Decentralized IDL)
+
+To satisfy enterprise interoperability requirements and provide a formal **Interface Definition Language (IDL)**, the Edge Gateway dynamically compiles internal service contracts into valid **OpenAPI v3.0 JSON specifications**.
+
+### Fetching OpenAPI Documents (GET Request)
+Clients can obtain the full schema of any registered service contract by performing a HTTP GET request:
+
+```bash
+curl http://localhost:8080/api/v1/service/calc_service
+```
+
+### Dynamic OpenAPI Response Structure
+If a contract is registered, the gateway generates and returns the OpenAPI description:
+
+```json
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "calc_service",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/services/calc_service": {
+      "post": {
+        "summary": "Invoke method on calc_service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["method", "payload"],
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": ["add"]
+                  },
+                  "payload": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful invocation"
+          },
+          "400": {
+            "description": "Invalid JSON or contract validation failed"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+If no contract exists for the requested service, the gateway returns a `404 Not Found` with a descriptive JSON payload:
+
+```json
+{
+  "status": "error",
+  "reason": "no_contract_registered"
+}
+```
+
+

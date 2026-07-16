@@ -51,6 +51,7 @@ rebar3 eunit
 
 For complete walkthroughs and domain integrations, see:
 - **[Tutorial Series (tutorial/index.md)](tutorial/index.md)**: Modular step-by-step instructions on setting up local multi-node clusters, registering services, and implementing patterns.
+- **[Standardized Runnable Use Cases (usecases/)](usecases/README.md)**: Executable implementations of the five domain-specific federated service use cases demonstrating SOFIA's core capabilities in action.
 - **[Verifiable Use Cases (Usecases.md)](Usecases.md)**: Real-world templates for water quality monitoring, industrial carbon tracking, and clinic referrals using SOFIA.
 
 

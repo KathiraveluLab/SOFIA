@@ -52,6 +52,15 @@ translate_payload(#{<<"action">> := <<"payment_gateway_charge">>,
                     <<"billing_cents">> := Cents,
                     <<"method">> := Method}) ->
     {payment_gateway_charge, PatientId, Cents, Method};
+translate_payload(#{<<"action">> := <<"add_potability_record">>,
+                    <<"sensor_id">> := SensorId,
+                    <<"ph">> := PH,
+                    <<"ppm">> := PPM}) ->
+    {add_potability_record, SensorId, PH, PPM};
+translate_payload(#{<<"action">> := <<"carbon_emissions_audit">>,
+                    <<"mill_id">> := MillId,
+                    <<"carbon_tons">> := CarbonTons}) ->
+    {carbon_emissions_audit, MillId, CarbonTons};
 translate_payload(Payload) ->
     %% Fallback mapping
     {raw_request, Payload}.

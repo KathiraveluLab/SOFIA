@@ -20,7 +20,8 @@ sofia_integration_test_() ->
       fun test_saga_recovery/0,
       fun test_qos_routing/0,
       fun test_rate_limiter/0,
-      fun test_dlq/0
+      fun test_dlq/0,
+      fun test_standardized_usecases/0
      ]}.
 
 setup() ->
@@ -639,4 +640,8 @@ test_dlq() ->
     MockPid ! stop,
     ok = sofia_registry:deregister_service(dlq_calc_service, MockPid),
     ok = application:stop(inets).
+
+test_standardized_usecases() ->
+    ?assertEqual(ok, usecases_runner:run()).
+
 

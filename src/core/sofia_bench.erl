@@ -1,0 +1,67 @@
+-module(sofia_bench).
+-export([run/0]).
+
+run() ->
+    io:format("Starting SOFIA Benchmarks...~n"),
+    %% Setup applications
+    application:start(sasl),
+    application:ensure_all_started(sofia),
+
+    %% 1. Direct local call
+    DirectFun = fun() -> ok end,
+    T1_start = erlang:system_time(nanosecond),
+    loop(100000, DirectFun),
+    T1_end = erlang:system_time(nanosecond),
+    DirectLatency = (T1_end - T1_start) / 100000.0 / 1000.0, %% microsec
+
+    %% 2. Circuit breaker call (closed)
+    BreakerFun = fun() -> ok end,
+    sofia_breaker:call(bench_service, BreakerFun),
+    T2_start = erlang:system_time(nanosecond),
+    loop(100000, fun() -> sofia_breaker:call(bench_service, BreakerFun) end),
+    T2_end = erlang:system_time(nanosecond),
+    BreakerLatency = (T2_end - T2_start) / 100000.0 / 1000.0, %% microsec
+
+    %% 3. Registry discover
+    Pid = self(),
+    sofia_registry:register_service(bench_service, Pid),
+    T3_start = erlang:system_time(nanosecond),
+    loop(50000, fun() -> sofia_registry:discover(bench_service) end),
+    T3_end = erlang:system_time(nanosecond),
+    RegistryLatency = (T3_end - T3_start) / 50000.0 / 1000.0, %% microsec
+    sofia_registry:deregister_service(bench_service, Pid),
+
+    %% 4. Rate Limiter check (Mnesia transaction)
+    sofia_rate_limiter:set_sla(<<"bench_client">>, 1000000.0, 1000000.0), %% very high rate so we don't get limited
+    T4_start = erlang:system_time(nanosecond),
+    loop(20000, fun() -> sofia_rate_limiter:check_rate(<<"bench_client">>) end),
+    T4_end = erlang:system_time(nanosecond),
+    RateLimitLatency = (T4_end - T4_start) / 20000.0 / 1000.0, %% microsec
+
+    %% 5. DLQ Enqueue (Mnesia transaction)
+    T5_start = erlang:system_time(nanosecond),
+    loop(20000, fun() -> sofia_dlq:enqueue(bench_service, test_reason, <<"payload">>, <<"client">>) end),
+    T5_end = erlang:system_time(nanosecond),
+    DLQLatency = (T5_end - T5_start) / 20000.0 / 1000.0, %% microsec
+
+    %% 6. Config Set (ETS write + cast)
+    T6_start = erlang:system_time(nanosecond),
+    loop(50000, fun() -> sofia_config:set(bench_config_key, 42) end),
+    T6_end = erlang:system_time(nanosecond),
+    ConfigLatency = (T6_end - T6_start) / 50000.0 / 1000.0, %% microsec
+
+    io:format("Direct Local Call: ~8.4f microsec~n", [DirectLatency]),
+    io:format("Circuit Breaker Call (Closed): ~8.4f microsec~n", [BreakerLatency]),
+    io:format("Registry Service Discovery: ~8.4f microsec~n", [RegistryLatency]),
+    io:format("Rate Limiter Check (Mnesia): ~8.4f microsec~n", [RateLimitLatency]),
+    io:format("DLQ Enqueue (Mnesia): ~8.4f microsec~n", [DLQLatency]),
+    io:format("Config Update (ETS + RPC): ~8.4f microsec~n", [ConfigLatency]),
+
+    application:stop(sofia),
+    application:stop(sasl),
+    ok.
+
+loop(0, _) -> ok;
+loop(N, Fun) ->
+    Fun(),
+    loop(N-1, Fun).

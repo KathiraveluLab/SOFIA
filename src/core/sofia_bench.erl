@@ -326,6 +326,8 @@ run() ->
         _ -> io:format("Actual Redis Saga WAL Status Sync (SOTA):  ~.4f microsec~n", [SagaSOTALatency])
     end,
 
+    run_scalability(),
+
     application:stop(sofia),
     application:stop(sasl),
     ok.
@@ -361,4 +363,81 @@ echo_loop(Socket) ->
 
 hex_digit(N) when N >= 0, N =< 9 -> N + $0;
 hex_digit(N) when N >= 10, N =< 15 -> N - 10 + $a.
+
+run_scalability() ->
+    Sizes = [2, 4, 8, 16, 32],
+    Trials = 50,
+    io:format("~nSaga Scalability (Problem Size vs Execution Time):~n"),
+    RedisSocket = case gen_tcp:connect("localhost", 6379, [binary, {active, false}]) of
+        {ok, Sock} -> Sock;
+        _ -> undefined
+    end,
+    lists:foreach(fun(N) ->
+        %% SOFIA Saga
+        ActionFun = fun() -> {ok, result} end,
+        CompFun = fun(_) -> ok end,
+        Steps = [{ActionFun, CompFun} || _ <- lists:seq(1, N)],
+        
+        SOFIATimes = [
+            begin
+                T_start = erlang:system_time(nanosecond),
+                {ok, _} = sofia_saga:execute(Steps),
+                T_end = erlang:system_time(nanosecond),
+                (T_end - T_start) / 1000.0 %% microsec
+            end || _ <- lists:seq(1, Trials)
+        ],
+        SOFIAMean = mean(SOFIATimes),
+        SOFIAStd = std_dev(SOFIATimes, SOFIAMean),
+        
+        %% SOTA Saga
+        SOTAMean = case RedisSocket of
+            undefined -> undefined;
+            _ ->
+                SOTATimes = [
+                    begin
+                        T_start2 = erlang:system_time(nanosecond),
+                        run_sota_saga(RedisSocket, N),
+                        T_end2 = erlang:system_time(nanosecond),
+                        (T_end2 - T_start2) / 1000.0 %% microsec
+                    end || _ <- lists:seq(1, Trials)
+                ],
+                SOTAMeanVal = mean(SOTATimes),
+                SOTAStdVal = std_dev(SOTATimes, SOTAMeanVal),
+                {SOTAMeanVal, SOTAStdVal}
+        end,
+        
+        case SOTAMean of
+            undefined ->
+                io:format("Steps: ~2b | SOFIA: ~.2f +/- ~.2f us~n", [N, SOFIAMean, SOFIAStd]);
+            {SMean, SStd} ->
+                io:format("Steps: ~2b | SOFIA: ~.2f +/- ~.2f us | SOTA: ~.2f +/- ~.2f us~n", 
+                          [N, SOFIAMean, SOFIAStd, SMean, SStd])
+        end
+    end, Sizes),
+    case RedisSocket of
+        undefined -> ok;
+        _ -> gen_tcp:close(RedisSocket)
+    end,
+    ok.
+
+run_sota_saga(Socket, N) ->
+    ok = gen_tcp:send(Socket, <<"*3\r\n$3\r\nSET\r\n$8\r\nsaga:123\r\n$7\r\nrunning\r\n">>),
+    {ok, _} = gen_tcp:recv(Socket, 0),
+    lists:foreach(fun(I) ->
+        StepName = list_to_binary("step" ++ integer_to_list(I)),
+        LenName = integer_to_binary(byte_size(StepName)),
+        Cmd = <<"*4\r\n$4\r\nHSET\r\n$8\r\nsaga:123\r\n$", LenName/binary, "\r\n", StepName/binary, "\r\n$2\r\nok\r\n">>,
+        ok = gen_tcp:send(Socket, Cmd),
+        {ok, _} = gen_tcp:recv(Socket, 0)
+    end, lists:seq(1, N)),
+    ok = gen_tcp:send(Socket, <<"*3\r\n$3\r\nSET\r\n$8\r\nsaga:123\r\n$9\r\ncompleted\r\n">>),
+    {ok, _} = gen_tcp:recv(Socket, 0),
+    ok.
+
+mean(List) ->
+    lists:sum(List) / length(List).
+
+std_dev(List, Mean) ->
+    DiffSq = [(X - Mean) * (X - Mean) || X <- List],
+    math:sqrt(lists:sum(DiffSq) / length(List)).
 

@@ -47,6 +47,31 @@ SOFIA utilizes EUnit to validate its core modules. Run the test suite using:
 rebar3 eunit
 ```
 
+## Reproducing Evaluation Results
+
+SOFIA includes a complete bare-metal quantitative benchmark suite to evaluate its performance, scalability, and transaction latency against State-of-the-Art (SOTA) middleware layers (Redis, Consul, and HTTP collectors).
+
+For a complete setup guide and convenience Docker runners, see **[usecases/README.md](usecases/README.md)**.
+
+### Quick Start (Bare-Metal)
+
+1. **Setup SOTA Binaries**:
+   ```bash
+   ./usecases/setup_sota_binaries.sh
+   ```
+
+2. **Run Micro-benchmarks**:
+   ```bash
+   ./usecases/run_sota_benchmarks.sh
+   ```
+   *This starts the background Redis/Consul processes, runs single-node SOFIA and SOTA comparisons, performs the Saga scalability test, and cleans up all background processes.*
+
+3. **Run Clustered Benchmarks**:
+   ```bash
+   ./usecases/run_distributed_deployment.sh
+   ```
+   *This spawns a multi-node cluster on the host to measure real cross-node configuration and service discovery propagation latency.*
+
 ## Guides and Documentation
 
 For complete walkthroughs and domain integrations, see:

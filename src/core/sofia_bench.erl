@@ -73,6 +73,51 @@ run() ->
     T8_end = erlang:system_time(nanosecond),
     HTTPRoundtrip = (T8_end - T8_start) / 500.0 / 1000.0,
 
+    %% 9. Real Redis GET Latency (over local TCP loopback)
+    RedisLatency = case gen_tcp:connect("localhost", 6379, [binary, {active, false}]) of
+        {ok, RedisSocket} ->
+            %% Warm up & Set key
+            ok = gen_tcp:send(RedisSocket, <<"*3\r\n$3\r\nSET\r\n$8\r\ntest_key\r\n$2\r\n42\r\n">>),
+            {ok, _} = gen_tcp:recv(RedisSocket, 0),
+            T9_start = erlang:system_time(nanosecond),
+            loop(5000, fun() ->
+                ok = gen_tcp:send(RedisSocket, <<"*2\r\n$3\r\nGET\r\n$8\r\ntest_key\r\n">>),
+                {ok, _} = gen_tcp:recv(RedisSocket, 0)
+            end),
+            T9_end = erlang:system_time(nanosecond),
+            gen_tcp:close(RedisSocket),
+            (T9_end - T9_start) / 5000.0 / 1000.0;
+        _ ->
+            undefined
+    end,
+
+    %% 10. Real Consul KV GET Latency (over local HTTP REST)
+    ConsulConfigLatency = case httpc:request(put, {"http://localhost:8500/v1/kv/test_key", [], "text/plain", "42"}, [], []) of
+        {ok, _} ->
+            T10_start = erlang:system_time(nanosecond),
+            loop(500, fun() ->
+                {ok, {{_, 200, _}, _, _}} = httpc:request(get, {"http://localhost:8500/v1/kv/test_key", []}, [], [])
+            end),
+            T10_end = erlang:system_time(nanosecond),
+            (T10_end - T10_start) / 500.0 / 1000.0;
+        _ ->
+            undefined
+    end,
+
+    %% 11. Real Consul Service Discovery Latency (over local HTTP REST)
+    ConsulDiscLatency = case httpc:request(put, {"http://localhost:8500/v1/agent/service/register", [], "application/json", "{\"ID\": \"test_service\", \"Name\": \"test_service\", \"Address\": \"127.0.0.1\", \"Port\": 8080}"}, [], []) of
+        {ok, _} ->
+            T11_start = erlang:system_time(nanosecond),
+            loop(500, fun() ->
+                {ok, {{_, 200, _}, _, _}} = httpc:request(get, {"http://localhost:8500/v1/catalog/service/test_service", []}, [], [])
+            end),
+            T11_end = erlang:system_time(nanosecond),
+            httpc:request(put, {"http://localhost:8500/v1/agent/service/deregister/test_service", [], "", ""}, [], []),
+            (T11_end - T11_start) / 500.0 / 1000.0;
+        _ ->
+            undefined
+    end,
+
     io:format("Direct Local Call: ~8.4f microsec~n", [DirectLatency]),
     io:format("Circuit Breaker Call (Closed): ~8.4f microsec~n", [BreakerLatency]),
     io:format("Registry Service Discovery: ~8.4f microsec~n", [RegistryLatency]),
@@ -81,6 +126,18 @@ run() ->
     io:format("Config Update (ETS + RPC): ~8.4f microsec~n", [ConfigLatency]),
     io:format("Simulated TCP Loopback Roundtrip (SOTA Network Baseline): ~8.4f microsec~n", [TCPRoundtrip]),
     io:format("Simulated HTTP Gateway Roundtrip (Consul/REST Baseline): ~8.4f microsec~n", [HTTPRoundtrip]),
+    case RedisLatency of
+        undefined -> ok;
+        _ -> io:format("Actual Redis GET Latency (over TCP): ~8.4f microsec~n", [RedisLatency])
+    end,
+    case ConsulConfigLatency of
+        undefined -> ok;
+        _ -> io:format("Actual Consul KV GET Latency (over HTTP): ~8.4f microsec~n", [ConsulConfigLatency])
+    end,
+    case ConsulDiscLatency of
+        undefined -> ok;
+        _ -> io:format("Actual Consul Service Discovery Latency (over HTTP): ~8.4f microsec~n", [ConsulDiscLatency])
+    end,
 
     application:stop(sofia),
     application:stop(sasl),

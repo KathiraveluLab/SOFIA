@@ -42,26 +42,34 @@ set_local(Key, Value) ->
     set_local(Key, Value, 0, node()).
 
 set_local(Key, Value, Timestamp, Node) ->
-    case ets:lookup(?TABLE, Key) of
-        [{Key, _, ExistingTimestamp, ExistingNode}] ->
-            %% Last-Write-Wins (LWW) Register: compare timestamp first, tie-break on Node name
-            case {Timestamp, Node} > {ExistingTimestamp, ExistingNode} of
-                true ->
+    case ets:info(?TABLE) of
+        undefined -> ok;
+        _ ->
+            case ets:lookup(?TABLE, Key) of
+                [{Key, _, ExistingTimestamp, ExistingNode}] ->
+                    %% Last-Write-Wins (LWW) Register: compare timestamp first, tie-break on Node name
+                    case {Timestamp, Node} > {ExistingTimestamp, ExistingNode} of
+                        true ->
+                            ets:insert(?TABLE, {Key, Value, Timestamp, Node}),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                [] ->
                     ets:insert(?TABLE, {Key, Value, Timestamp, Node}),
-                    ok;
-                false ->
                     ok
-            end;
-        [] ->
-            ets:insert(?TABLE, {Key, Value, Timestamp, Node}),
-            ok
+            end
     end.
 
 %% Pushes our entire local config to target node
 request_push(TargetNode) ->
-    LocalEntries = ets:tab2list(?TABLE),
-    [rpc:cast(TargetNode, ?MODULE, set_local, [K, V, T, N]) || {K, V, T, N} <- LocalEntries],
-    ok.
+    case ets:info(?TABLE) of
+        undefined -> ok;
+        _ ->
+            LocalEntries = ets:tab2list(?TABLE),
+            [rpc:cast(TargetNode, ?MODULE, set_local, [K, V, T, N]) || {K, V, T, N} <- LocalEntries],
+            ok
+    end.
 
 %% ===================================================================
 %% gen_server callbacks

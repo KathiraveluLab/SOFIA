@@ -50,12 +50,37 @@ run() ->
     T6_end = erlang:system_time(nanosecond),
     ConfigLatency = (T6_end - T6_start) / 50000.0 / 1000.0, %% microsec
 
+    %% 7. TCP Loopback Roundtrip (Simulated SOTA Sidecar/Cache network overhead)
+    {ok, TCPPort, ListenSocket, EchoServerPid} = start_echo_server(),
+    {ok, Socket} = gen_tcp:connect("localhost", TCPPort, [binary, {packet, 0}, {active, false}]),
+    T7_start = erlang:system_time(nanosecond),
+    loop(5000, fun() ->
+        gen_tcp:send(Socket, <<"ping">>),
+        {ok, <<"ping">>} = gen_tcp:recv(Socket, 0)
+    end),
+    T7_end = erlang:system_time(nanosecond),
+    TCPRoundtrip = (T7_end - T7_start) / 5000.0 / 1000.0,
+    gen_tcp:close(Socket),
+    gen_tcp:close(ListenSocket),
+    exit(EchoServerPid, kill),
+
+    %% 8. HTTP Gateway Roundtrip (Simulated Consul/Registry HTTP REST lookup)
+    inets:start(),
+    T8_start = erlang:system_time(nanosecond),
+    loop(500, fun() ->
+        {ok, {{_, 200, _}, _, _}} = httpc:request(get, {"http://localhost:8080/health", []}, [], [])
+    end),
+    T8_end = erlang:system_time(nanosecond),
+    HTTPRoundtrip = (T8_end - T8_start) / 500.0 / 1000.0,
+
     io:format("Direct Local Call: ~8.4f microsec~n", [DirectLatency]),
     io:format("Circuit Breaker Call (Closed): ~8.4f microsec~n", [BreakerLatency]),
     io:format("Registry Service Discovery: ~8.4f microsec~n", [RegistryLatency]),
     io:format("Rate Limiter Check (Mnesia): ~8.4f microsec~n", [RateLimitLatency]),
     io:format("DLQ Enqueue (Mnesia): ~8.4f microsec~n", [DLQLatency]),
     io:format("Config Update (ETS + RPC): ~8.4f microsec~n", [ConfigLatency]),
+    io:format("Simulated TCP Loopback Roundtrip (SOTA Network Baseline): ~8.4f microsec~n", [TCPRoundtrip]),
+    io:format("Simulated HTTP Gateway Roundtrip (Consul/REST Baseline): ~8.4f microsec~n", [HTTPRoundtrip]),
 
     application:stop(sofia),
     application:stop(sasl),
@@ -65,3 +90,28 @@ loop(0, _) -> ok;
 loop(N, Fun) ->
     Fun(),
     loop(N-1, Fun).
+
+start_echo_server() ->
+    {ok, ListenSocket} = gen_tcp:listen(0, [binary, {packet, 0}, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(ListenSocket),
+    Pid = spawn(fun() -> accept_loop(ListenSocket) end),
+    {ok, Port, ListenSocket, Pid}.
+
+accept_loop(ListenSocket) ->
+    case gen_tcp:accept(ListenSocket) of
+        {ok, Socket} ->
+            spawn(fun() -> echo_loop(Socket) end),
+            accept_loop(ListenSocket);
+        _ ->
+            ok
+    end.
+
+echo_loop(Socket) ->
+    case gen_tcp:recv(Socket, 0) of
+        {ok, Data} ->
+            gen_tcp:send(Socket, Data),
+            echo_loop(Socket);
+        {error, closed} ->
+            ok
+    end.
+

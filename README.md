@@ -49,28 +49,26 @@ rebar3 eunit
 
 ## Reproducing Evaluation Results
 
-SOFIA includes a complete bare-metal quantitative benchmark suite to evaluate its performance, scalability, and transaction latency against State-of-the-Art (SOTA) middleware layers (Redis, Consul, and HTTP collectors).
+SOFIA includes a complete quantitative benchmark suite and automated Makefile in `usecases/` to evaluate its performance, scalability, and transaction latency against State-of-the-Art (SOTA) middleware layers (Redis, Consul, and HTTP collectors).
 
-For a complete setup guide and convenience Docker runners, see **[usecases/README.md](usecases/README.md)**.
+For a complete setup guide and convenience runners, see **[usecases/README.md](usecases/README.md)**.
 
-### Quick Start (Bare-Metal)
+### Quick Start
 
-1. **Setup SOTA Binaries**:
+1. **Master Reproducibility Suite**:
    ```bash
-   ./usecases/setup_sota_binaries.sh
+   ./usecases/run_reproducibility_suite.sh
    ```
 
-2. **Run Micro-benchmarks**:
+2. **Using the Convenience Makefile (`usecases/Makefile`)**:
    ```bash
-   ./usecases/run_sota_benchmarks.sh
+   cd usecases
+   make check    # Runs unit tests, benchmarks, cluster evaluation, and compiles paper PDF
+   make test     # Runs EUnit test suite
+   make bench    # Runs subsystem micro-benchmarks
+   make cluster  # Runs multi-node clustered deployment benchmarks
+   make paper    # Compiles IEEE TSC manuscript PDF
    ```
-   *This starts the background Redis/Consul processes, runs single-node SOFIA and SOTA comparisons, performs the Saga scalability test, and cleans up all background processes.*
-
-3. **Run Clustered Benchmarks**:
-   ```bash
-   ./usecases/run_distributed_deployment.sh
-   ```
-   *This spawns a multi-node cluster on the host to measure real cross-node configuration and service discovery propagation latency.*
 
 ## Guides and Documentation
 

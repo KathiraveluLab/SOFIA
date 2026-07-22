@@ -75,28 +75,33 @@ ok
 
 ## Benchmarking and SOTA Baseline Verification
 
-To truthfully evaluate SOFIA's performance against State-Of-The-Art (SOTA) middleware layers, this repository contains quantitative benchmark scripts comparing their latency:
+To truthfully evaluate SOFIA's performance against State-Of-The-Art (SOTA) middleware layers, this folder contains quantitative benchmark scripts, Makefile targets, and reproducibility suites:
 
-### 1. Bare-Metal Benchmarks (Default)
-To ensure a completely fair, like-for-like comparison, the paper evaluation was executed with both SOFIA and the SOTA services (Redis, Consul, and HTTP loopback endpoints) running directly on the host hardware (bare metal) without any containerization overhead.
-
-To compile/download the required local binaries to `third_party/`:
-* Consul is downloaded as a precompiled static binary for Linux.
-* Redis is compiled from source in the workspace.
-
-To execute the bare-metal benchmarks:
+### 1. Master Reproducibility Suite (`run_reproducibility_suite.sh`)
+Executes unit tests, single-node micro-benchmarks, 2-node clustered benchmarks, and compiles the IEEE TSC manuscript:
 ```bash
-# Set up third_party binaries if not already done:
-# mkdir -p third_party
-# wget https://releases.hashicorp.com/consul/1.18.1/consul_1.18.1_linux_amd64.zip -O third_party/consul.zip && unzip third_party/consul.zip -d third_party
-# wget https://download.redis.io/releases/redis-7.2.4.tar.gz && tar -xzf redis-7.2.4.tar.gz -C third_party && cd third_party/redis-7.2.4 && make MALLOC=libc
+./usecases/run_reproducibility_suite.sh
+```
 
-# Run the benchmark runner:
+### 2. Convenience Makefile (`Makefile`)
+Provides granular targets for running specific verification tasks:
+```bash
+cd usecases
+make check    # Runs full test, benchmark, cluster, and paper compilation suite
+make test     # Runs EUnit unit test suite
+make bench    # Runs subsystem micro-benchmarks
+make cluster  # Runs 2-node clustered deployment benchmark
+make paper    # Compiles IEEE TSC manuscript PDF
+```
+
+### 3. SOTA Bare-Metal Benchmarks
+To execute bare-metal SOTA comparisons against Redis and Consul:
+```bash
 ./usecases/run_sota_benchmarks.sh
 ```
 This script automatically starts the local Redis and Consul servers on the host, runs the Erlang benchmark suite, collects latency metrics, and stops all background SOTA processes cleanly upon completion.
 
-### 2. Docker-based Benchmarks (For Convenience Only)
+### 4. Docker-based Benchmarks (For Convenience Only)
 If you prefer not to compile Redis or download Consul binaries directly on your host machine, you can run the SOTA services inside Docker containers using:
 ```bash
 ./usecases/run_sota_benchmarks_docker.sh

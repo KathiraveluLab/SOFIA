@@ -176,7 +176,20 @@ test_saga() ->
     %% Verify step1 was executed then compensated, and step2 was never finalized
     ?assertEqual([{step1, compensated}], ets:lookup(T, step1)),
     
+    %% Reset state for timeout test
+    ets:insert(T, {step1, pending}),
+    Step2TimeoutAction = fun() -> timer:sleep(500), {ok, step2_slow} end,
+    TimeoutSteps = [
+        {Step1Action, Step1Compensate},
+        {Step2TimeoutAction, Step2Compensate}
+    ],
+    
+    TimeoutResult = sofia_saga:execute(TimeoutSteps, 50), %% 50ms step timeout
+    ?assertEqual({error, {step_failed, step_timeout, [{ok, ok}]}}, TimeoutResult),
+    ?assertEqual([{step1, compensated}], ets:lookup(T, step1)),
+    
     ets:delete(T).
+
 
 test_skeleton_and_stub() ->
     ServiceType = skeleton_test_service,

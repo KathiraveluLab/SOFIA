@@ -2,12 +2,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, execute/1, recover_sagas/0]).
+-export([start_link/0, execute/1, execute/2, recover_sagas/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
+-define(DEFAULT_STEP_TIMEOUT, 5000). %% 5 seconds default per step
 
 -record(state, {}).
 
@@ -26,11 +27,12 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-%% Executes a list of steps in a Saga orchestration.
-%% Each step is of form: {Action, Compensate}
-%% Action: 0-arity fun or {M, F, A}
-%% Compensate: 1-arity fun or {M, F, A}
+%% Executes a list of steps in a Saga orchestration with default step timeout.
 execute(Steps) ->
+    execute(Steps, ?DEFAULT_STEP_TIMEOUT).
+
+%% Executes a list of steps with a specified TimeoutMs or Options map.
+execute(Steps, TimeoutMs) when is_integer(TimeoutMs) ->
     SagaId = make_ref(),
     TotalSteps = length(Steps),
     Record = #sofia_sagas{
@@ -42,13 +44,16 @@ execute(Steps) ->
     },
     F = fun() -> mnesia:write(Record) end,
     {atomic, ok} = mnesia:transaction(F),
-    execute_loop(SagaId, Steps, 1, []).
+    execute_loop(SagaId, Steps, 1, [], TimeoutMs);
+execute(Steps, Opts) when is_map(Opts) ->
+    TimeoutMs = maps:get(timeout, Opts, ?DEFAULT_STEP_TIMEOUT),
+    execute(Steps, TimeoutMs).
 
 %% ===================================================================
 %% Internal Helpers
 %% ===================================================================
 
-execute_loop(SagaId, [], _Index, Completed) ->
+execute_loop(SagaId, [], _Index, Completed, _TimeoutMs) ->
     F = fun() ->
         case mnesia:read(sofia_sagas, SagaId) of
             [R] ->
@@ -60,8 +65,8 @@ execute_loop(SagaId, [], _Index, Completed) ->
     {atomic, _} = mnesia:transaction(F),
     Results = [Res || {_Idx, Res, _Comp} <- lists:reverse(Completed)],
     {ok, Results};
-execute_loop(SagaId, [{Action, Compensate} | Rest], Index, Completed) ->
-    try run_action(Action) of
+execute_loop(SagaId, [{Action, Compensate} | Rest], Index, Completed, TimeoutMs) ->
+    case run_action_with_timeout(Action, TimeoutMs) of
         {ok, Result} ->
             NewCompleted = [{Index, Result, Compensate} | Completed],
             F = fun() ->
@@ -73,10 +78,13 @@ execute_loop(SagaId, [{Action, Compensate} | Rest], Index, Completed) ->
                 end
             end,
             {atomic, _} = mnesia:transaction(F),
-            execute_loop(SagaId, Rest, Index + 1, NewCompleted);
+            execute_loop(SagaId, Rest, Index + 1, NewCompleted, TimeoutMs);
         {error, Reason} ->
             CompensateResults = rollback_saga(SagaId, Completed),
             {error, {step_failed, Reason, CompensateResults}};
+        {crashed, Class, Reason, Stacktrace} ->
+            CompensateResults = rollback_saga(SagaId, Completed),
+            {error, {step_crashed, Class, Reason, Stacktrace, CompensateResults}};
         Other ->
             NewCompleted = [{Index, Other, Compensate} | Completed],
             F = fun() ->
@@ -88,12 +96,34 @@ execute_loop(SagaId, [{Action, Compensate} | Rest], Index, Completed) ->
                 end
             end,
             {atomic, _} = mnesia:transaction(F),
-            execute_loop(SagaId, Rest, Index + 1, NewCompleted)
-    catch
-        Class:Reason:Stacktrace ->
-            CompensateResults = rollback_saga(SagaId, Completed),
-            {error, {step_crashed, Class, Reason, Stacktrace, CompensateResults}}
+            execute_loop(SagaId, Rest, Index + 1, NewCompleted, TimeoutMs)
     end.
+
+run_action_with_timeout(Action, TimeoutMs) ->
+    Self = self(),
+    {Pid, MRef} = spawn_monitor(fun() ->
+        try run_action(Action) of
+            Res -> Self ! {step_result, self(), Res}
+        catch
+            Class:Reason:Stacktrace ->
+                Self ! {step_crashed, self(), Class, Reason, Stacktrace}
+        end
+    end),
+    receive
+        {step_result, Pid, Res} ->
+            erlang:demonitor(MRef, [flush]),
+            Res;
+        {step_crashed, Pid, Class, Reason, Stacktrace} ->
+            erlang:demonitor(MRef, [flush]),
+            {crashed, Class, Reason, Stacktrace};
+        {'DOWN', MRef, process, Pid, Reason} ->
+            {error, {process_down, Reason}}
+    after TimeoutMs ->
+        erlang:demonitor(MRef, [flush]),
+        exit(Pid, kill),
+        {error, step_timeout}
+    end.
+
 
 rollback_saga(SagaId, Completed) ->
     F = fun() ->

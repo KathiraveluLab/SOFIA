@@ -10,8 +10,10 @@ sofia_core_test_() ->
       fun test_breaker/0,
       fun test_config/0,
       fun test_contracts/0,
-      fun test_tracer_sampling/0
+      fun test_tracer_sampling/0,
+      fun test_supervisor_flags/0
      ]}.
+
 
 
 setup() ->
@@ -206,5 +208,11 @@ test_tracer_sampling() ->
     ?assertEqual(500.0, maps:get(r_target, Metrics2)),
     
     ok = sofia_tracer:clear().
+
+test_supervisor_flags() ->
+    {ok, {SupFlags, ChildSpecs}} = sofia_sup:init([]),
+    ?assertMatch(#{strategy := one_for_all, intensity := 3, period := 5}, SupFlags),
+    ?assertEqual(10, length(ChildSpecs)).
+
 
 

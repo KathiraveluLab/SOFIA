@@ -12,8 +12,10 @@ sofia_core_test_() ->
       fun test_contracts/0,
       fun test_tracer_sampling/0,
       fun test_supervisor_flags/0,
-      fun test_dlq_pruning/0
+      fun test_dlq_pruning/0,
+      fun test_rate_limiter_reset/0
      ]}.
+
 
 
 
@@ -246,6 +248,16 @@ test_dlq_pruning() ->
     ?assertEqual(0, length(FinalEntries)),
     
     ok = sofia_dlq:purge().
+
+test_rate_limiter_reset() ->
+    Client = <<"reset_test_client">>,
+    ok = sofia_rate_limiter:set_sla(Client, 1.0, 2.0),
+    ?assertEqual(ok, sofia_rate_limiter:check_rate(Client)),
+    ?assertEqual(ok, sofia_rate_limiter:check_rate(Client)),
+    ?assertEqual({error, rate_limited}, sofia_rate_limiter:check_rate(Client)),
+    ?assertEqual(ok, sofia_rate_limiter:reset_bucket(Client)),
+    ?assertEqual(ok, sofia_rate_limiter:check_rate(Client)).
+
 
 
 

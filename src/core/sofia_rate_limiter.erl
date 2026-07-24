@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, check_rate/1, set_sla/3, get_sla/1]).
+-export([start_link/0, check_rate/1, set_sla/3, get_sla/1, reset_bucket/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -55,6 +55,24 @@ get_sla(ClientId) ->
         _ ->
             {?DEFAULT_RATE, ?DEFAULT_CAPACITY}
     end.
+
+%% @doc Resets the token bucket for ClientId to full SLA capacity.
+reset_bucket(ClientId) ->
+    {_Rate, Capacity} = get_sla(ClientId),
+    Now = erlang:system_time(microsecond),
+    F = fun() ->
+        mnesia:write(sofia_rate_buckets,
+            #sofia_rate_buckets{
+                client_id   = ClientId,
+                tokens      = Capacity,
+                last_update = Now
+            }, write)
+    end,
+    case mnesia:transaction(F) of
+        {atomic, ok} -> ok;
+        Other -> Other
+    end.
+
 
 %% ===================================================================
 %% gen_server callbacks

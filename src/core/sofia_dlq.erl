@@ -140,8 +140,15 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
 handle_info(prune_tick, State = #{ttl_ms := TTLMs, max_entries := MaxEntries}) ->
-    _ = prune_expired_and_overflow(TTLMs, MaxEntries),
+    case prune_expired_and_overflow(TTLMs, MaxEntries) of
+        {ok, {Expired, Overflow}} when Expired > 0 orelse Overflow > 0 ->
+            logger:info("SOFIA DLQ Prune Tick: purged ~p expired TTL entries, ~p overflow entries",
+                        [Expired, Overflow]);
+        _ ->
+            ok
+    end,
     {noreply, State};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 

@@ -11,8 +11,10 @@ sofia_core_test_() ->
       fun test_config/0,
       fun test_contracts/0,
       fun test_tracer_sampling/0,
-      fun test_supervisor_flags/0
+      fun test_supervisor_flags/0,
+      fun test_dlq_pruning/0
      ]}.
+
 
 
 
@@ -213,6 +215,33 @@ test_supervisor_flags() ->
     {ok, {SupFlags, ChildSpecs}} = sofia_sup:init([]),
     ?assertMatch(#{strategy := one_for_all, intensity := 3, period := 5}, SupFlags),
     ?assertEqual(10, length(ChildSpecs)).
+
+test_dlq_pruning() ->
+    ok = sofia_dlq:purge(),
+    
+    %% Enqueue 5 test records
+    sofia_dlq:enqueue(service_a, reason1, <<"payload1">>, <<"client1">>),
+    sofia_dlq:enqueue(service_a, reason2, <<"payload2">>, <<"client1">>),
+    sofia_dlq:enqueue(service_b, reason3, <<"payload3">>, <<"client2">>),
+    sofia_dlq:enqueue(service_b, reason4, <<"payload4">>, <<"client2">>),
+    sofia_dlq:enqueue(service_b, reason5, <<"payload5">>, <<"client3">>),
+    timer:sleep(50),
+    
+    {ok, Entries} = sofia_dlq:list(),
+    ?assertEqual(5, length(Entries)),
+    
+    %% Prune with max_entries = 3 (should drop 2 oldest entries)
+    ?assertEqual({ok, {0, 2}}, sofia_dlq:prune(604800000, 3)),
+    {ok, Remaining} = sofia_dlq:list(),
+    ?assertEqual(3, length(Remaining)),
+    
+    %% Prune with TTL = 0 (should expire all entries)
+    ?assertEqual({ok, {3, 0}}, sofia_dlq:prune(0, 1000)),
+    {ok, FinalEntries} = sofia_dlq:list(),
+    ?assertEqual(0, length(FinalEntries)),
+    
+    ok = sofia_dlq:purge().
+
 
 
 

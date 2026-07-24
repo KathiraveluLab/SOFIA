@@ -113,6 +113,11 @@ test_config() ->
     ?assertEqual(ok, sofia_config:set(my_key, "some_value")),
     ?assertEqual("some_value", sofia_config:get(my_key)),
     
+    %% Setting key with explicit timeout parameter
+    ?assertEqual(ok, sofia_config:set(my_timeout_key, "timeout_value", 2000)),
+    ?assertEqual("timeout_value", sofia_config:get(my_timeout_key)),
+
+    
     %% Local updates via set_local work
     ?assertEqual(ok, sofia_config:set_local(my_key2, 42)),
     ?assertEqual(42, sofia_config:get(my_key2)),

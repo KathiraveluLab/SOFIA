@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, set/2, get/1, get/2, set_local/2, set_local/4, request_push/1]).
+-export([start_link/0, set/2, set/3, get/1, get/2, set_local/2, set_local/4, request_push/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -19,13 +19,25 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+%% @doc Sets a key-value pair and broadcasts asynchronously to all cluster nodes.
 set(Key, Value) ->
+    set(Key, Value, infinity).
+
+%% @doc Sets a key-value pair with an optional broadcast timeout in milliseconds or 'infinity'.
+set(Key, Value, Timeout) ->
     Timestamp = erlang:system_time(microsecond),
     Node = node(),
     set_local(Key, Value, Timestamp, Node),
-    %% Broadcast to all other nodes in the Erlang cluster for federated configuration sync
-    [rpc:cast(N, ?MODULE, set_local, [Key, Value, Timestamp, Node]) || N <- nodes()],
-    ok.
+    ClusterNodes = nodes(),
+    case Timeout of
+        infinity ->
+            [rpc:cast(N, ?MODULE, set_local, [Key, Value, Timestamp, Node]) || N <- ClusterNodes],
+            ok;
+        TimeoutMs when is_integer(TimeoutMs), TimeoutMs > 0 ->
+            {_Results, _BadNodes} = rpc:multicall(ClusterNodes, ?MODULE, set_local, [Key, Value, Timestamp, Node], TimeoutMs),
+            ok
+    end.
+
 
 get(Key) ->
     get(Key, undefined).

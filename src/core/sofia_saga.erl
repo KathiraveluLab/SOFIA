@@ -9,6 +9,7 @@
 
 -define(SERVER, ?MODULE).
 -define(DEFAULT_STEP_TIMEOUT, 5000). %% 5 seconds default per step
+-define(MAX_RECOVERY_ATTEMPTS, 3).   %% Max recovery attempts before marking saga failed
 
 -record(state, {}).
 
@@ -17,8 +18,10 @@
     status, %% running | completed | rolling_back | rolled_back | failed
     completed_steps = [], %% list of {Index, Result}
     total_steps = 0,
-    steps = []
+    steps = [],
+    retry_count = 0
 }).
+
 
 %% ===================================================================
 %% API functions
@@ -184,44 +187,54 @@ recover_sagas() ->
             ok
     end.
 
-recover_saga(#sofia_sagas{saga_id = SagaId, completed_steps = Completed, steps = Steps}) ->
-    F = fun() ->
-        case mnesia:read(sofia_sagas, SagaId) of
-            [R] ->
-                mnesia:write(R#sofia_sagas{status = rolling_back});
-            [] ->
-                ok
-        end
-    end,
-    {atomic, _} = mnesia:transaction(F),
-    
-    lists:foreach(
-        fun({Index, Result}) ->
-            case lists:nth(Index, Steps) of
-                {_Action, Compensate} ->
-                    try run_compensate(Compensate, Result) of
-                        _ -> ok
-                    catch
-                        Class:Reason ->
-                            error_logger:error_msg("Failed to run compensation during saga recovery: ~p:~p~n", [Class, Reason])
-                    end;
-                _ ->
-                    ok
-            end
-        end,
-        Completed
-    ),
-    
-    F2 = fun() ->
-        case mnesia:read(sofia_sagas, SagaId) of
-            [R] ->
-                mnesia:write(R#sofia_sagas{status = rolled_back});
-            [] ->
-                ok
-        end
-    end,
-    {atomic, _} = mnesia:transaction(F2),
-    ok.
+recover_saga(#sofia_sagas{saga_id = SagaId, completed_steps = Completed, steps = Steps, retry_count = Retries}) ->
+    if
+        Retries >= ?MAX_RECOVERY_ATTEMPTS ->
+            error_logger:error_msg("Saga ~p exceeded maximum recovery retries (~p), marking as failed.~n", [SagaId, ?MAX_RECOVERY_ATTEMPTS]),
+            F = fun() ->
+                case mnesia:read(sofia_sagas, SagaId) of
+                    [R] -> mnesia:write(R#sofia_sagas{status = failed});
+                    [] -> ok
+                end
+            end,
+            mnesia:transaction(F),
+            ok;
+        true ->
+            F = fun() ->
+                case mnesia:read(sofia_sagas, SagaId) of
+                    [R] -> mnesia:write(R#sofia_sagas{status = rolling_back, retry_count = Retries + 1});
+                    [] -> ok
+                end
+            end,
+            {atomic, _} = mnesia:transaction(F),
+            
+            lists:foreach(
+                fun({Index, Result}) ->
+                    case lists:nth(Index, Steps) of
+                        {_Action, Compensate} ->
+                            try run_compensate(Compensate, Result) of
+                                _ -> ok
+                            catch
+                                Class:Reason ->
+                                    error_logger:error_msg("Failed to run compensation during saga recovery: ~p:~p~n", [Class, Reason])
+                            end;
+                        _ ->
+                            ok
+                    end
+                end,
+                Completed
+            ),
+            
+            F2 = fun() ->
+                case mnesia:read(sofia_sagas, SagaId) of
+                    [R] -> mnesia:write(R#sofia_sagas{status = rolled_back});
+                    [] -> ok
+                end
+            end,
+            {atomic, _} = mnesia:transaction(F2),
+            ok
+    end.
+
 
 %% ===================================================================
 %% gen_server callbacks

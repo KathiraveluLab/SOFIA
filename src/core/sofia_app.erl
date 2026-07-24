@@ -30,7 +30,8 @@ init_mnesia() ->
     Tables = [
         {sofia_client_secrets, [client_id, secret]},
         {span, [span_id, trace_id, parent_span_id, name, node, start_time, end_time, duration]},
-        {sofia_sagas, [saga_id, status, completed_steps, total_steps, steps]},
+        {sofia_sagas, [saga_id, status, completed_steps, total_steps, steps, retry_count]},
+
         {sofia_service_metadata, [pid, service_type, metadata]},
         {sofia_slas, [client_id, rate, capacity]},
         {sofia_dlq_entries, [entry_id, timestamp, service, reason, payload, client_id, node]}

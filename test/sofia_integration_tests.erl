@@ -495,7 +495,8 @@ test_saga_recovery() ->
         {{erlang, self, []}, {sofia_integration_tests, recovery_compensate, [Table]}}
     ],
     
-    Record = {sofia_sagas, SagaId, running, [{1, step1_result}], 2, Steps},
+    Record = {sofia_sagas, SagaId, running, [{1, step1_result}], 2, Steps, 0},
+
     F = fun() -> mnesia:write(Record) end,
     {atomic, ok} = mnesia:transaction(F),
     
@@ -510,7 +511,16 @@ test_saga_recovery() ->
     {atomic, [UpdatedRecord]} = mnesia:transaction(FRead),
     ?assertEqual(rolled_back, element(3, UpdatedRecord)),
     
+    %% Assert max recovery retries threshold transitions saga to failed
+    SagaId2 = make_ref(),
+    FailedRecord = {sofia_sagas, SagaId2, running, [], 0, [], 3},
+    mnesia:transaction(fun() -> mnesia:write(FailedRecord) end),
+    ok = sofia_saga:recover_sagas(),
+    {atomic, [FailedResultRecord]} = mnesia:transaction(fun() -> mnesia:read(sofia_sagas, SagaId2) end),
+    ?assertEqual(failed, element(3, FailedResultRecord)),
+    
     ets:delete(Table).
+
 
 test_qos_routing() ->
     QosServer1 = spawn(fun() -> receive hold -> ok end end),

@@ -9,8 +9,10 @@ sofia_core_test_() ->
       fun test_registry/0,
       fun test_breaker/0,
       fun test_config/0,
-      fun test_contracts/0
+      fun test_contracts/0,
+      fun test_tracer_sampling/0
      ]}.
+
 
 setup() ->
     case application:start(sasl) of
@@ -174,3 +176,35 @@ test_contracts() ->
     %% Clean up
     MockPid ! stop,
     ok = sofia_registry:deregister_service(contract_calc_service, MockPid).
+
+test_tracer_sampling() ->
+    ok = sofia_tracer:clear(),
+    
+    %% Verify default metrics and sampling rate (> 0.9 when low traffic/low memory)
+    {ok, Metrics1} = sofia_tracer:get_metrics(),
+    ?assertEqual(1000.0, maps:get(r_target, Metrics1)),
+    {ok, Sigma1} = sofia_tracer:get_sampling_rate(),
+    ?assert(Sigma1 > 0.9),
+    
+    %% Start span under normal conditions
+    TraceId = sofia_tracer:generate_id(),
+    ?assertMatch({ok, _}, sofia_tracer:start_span(TraceId, test_sampling_span, undefined)),
+    
+    %% Set memory max very low (10 bytes, below current Mnesia size) to force sigma to 0
+    ok = sofia_tracer:set_max_memory(10.0),
+    ?assertEqual({ok, 0.0}, sofia_tracer:get_sampling_rate()),
+
+    
+    %% Restore max memory and verify sampling rate returns
+    ok = sofia_tracer:set_max_memory(100000000.0),
+    {ok, Sigma2} = sofia_tracer:get_sampling_rate(),
+    ?assert(Sigma2 > 0.9),
+    
+    %% Set target rate
+    ok = sofia_tracer:set_target_rate(500.0),
+    {ok, Metrics2} = sofia_tracer:get_metrics(),
+    ?assertEqual(500.0, maps:get(r_target, Metrics2)),
+    
+    ok = sofia_tracer:clear().
+
+

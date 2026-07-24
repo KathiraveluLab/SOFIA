@@ -27,12 +27,18 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-%% Executes a list of steps in a Saga orchestration with default step timeout.
+%% @doc Executes a list of steps in a Saga orchestration using default step timeout (5000 ms).
+%% Each step is of form: {Action, Compensate}
+%% Action: 0-arity fun or {M, F, A}
+%% Compensate: 1-arity fun receiving the Action's result, or {M, F, A}
 execute(Steps) ->
     execute(Steps, ?DEFAULT_STEP_TIMEOUT).
 
-%% Executes a list of steps with a specified TimeoutMs or Options map.
+%% @doc Executes a list of steps with a specified step execution timeout (in ms) or Options map.
+%% Options map syntax: #{timeout => TimeoutMs}.
+%% If any step exceeds the timeout, execution halts and compensating rollbacks execute in reverse order.
 execute(Steps, TimeoutMs) when is_integer(TimeoutMs) ->
+
     SagaId = make_ref(),
     TotalSteps = length(Steps),
     Record = #sofia_sagas{

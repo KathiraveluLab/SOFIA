@@ -27,6 +27,7 @@ third_party/
 .cursor
 .vscode
 .agent
+.agents
 .gemini
 
 # Mnesia database files

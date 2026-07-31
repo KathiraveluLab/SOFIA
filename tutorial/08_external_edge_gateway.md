@@ -311,4 +311,50 @@ If no contract exists for the requested service, the gateway returns a `404 Not 
 }
 ```
 
+---
+
+## 8. Health and Telemetry Metrics Endpoints
+
+To support operations and observability, the Edge Gateway exposes dedicated HTTP GET endpoints for node health checks and real-time operational metrics.
+
+### Node Health Check (`GET /health`)
+
+Returns node status and Erlang VM wall-clock uptime:
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "ok",
+  "node": "sofia@127.0.0.1",
+  "uptime": 12450
+}
+```
+
+### Observability & Telemetry Metrics (`GET /metrics`)
+
+Exposes real-time operational telemetry including dead-letter queue (DLQ) depths and ETS-backed circuit breaker states across all active services:
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+**Response (200 OK):**
+```json
+{
+  "node": "sofia@127.0.0.1",
+  "dlq_depth": 0,
+  "circuit_breakers": [
+    {
+      "service": "calc_service",
+      "state": "closed",
+      "failures": 0
+    }
+  ]
+}
+```
+
 

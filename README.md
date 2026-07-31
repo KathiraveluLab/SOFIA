@@ -53,14 +53,27 @@ SOFIA includes a complete quantitative benchmark suite and automated Makefile in
 
 For a complete setup guide and convenience runners, see **[usecases/README.md](usecases/README.md)**.
 
-### Quick Start
+### Benchmark Execution Options
 
-1. **Master Reproducibility Suite**:
+1. **Option A: Interactive Erlang Shell**
+   ```bash
+   rebar3 shell
+   ```
+   ```erlang
+   1> sofia_bench:run().
+   ```
+
+2. **Option B: Master Reproducibility Suite**
    ```bash
    ./usecases/run_reproducibility_suite.sh
    ```
 
-2. **Using the Convenience Makefile (`usecases/Makefile`)**:
+3. **Option C: Bare-Metal SOTA Benchmarks (Redis & Consul)**
+   ```bash
+   ./usecases/run_sota_benchmarks.sh
+   ```
+
+4. **Option D: Convenience Makefile (`usecases/Makefile`)**
    ```bash
    cd usecases
    make check    # Runs unit tests, benchmarks, cluster evaluation, and compiles paper PDF

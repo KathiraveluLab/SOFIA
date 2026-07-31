@@ -77,7 +77,14 @@ ok
 
 To truthfully evaluate SOFIA's performance against State-Of-The-Art (SOTA) middleware layers, this folder contains quantitative benchmark scripts, Makefile targets, and reproducibility suites:
 
-### 1. Master Reproducibility Suite (`run_reproducibility_suite.sh`)
+### 1. Interactive Erlang Shell (`sofia_bench:run()`)
+Run micro-benchmarks directly inside the Erlang REPL:
+```erlang
+$ rebar3 shell
+1> sofia_bench:run().
+```
+
+### 2. Master Reproducibility Suite (`run_reproducibility_suite.sh`)
 Executes unit tests, single-node micro-benchmarks, 2-node clustered benchmarks, and compiles the IEEE TSC manuscript:
 ```bash
 ./usecases/run_reproducibility_suite.sh

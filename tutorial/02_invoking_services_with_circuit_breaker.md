@@ -15,9 +15,21 @@ stateDiagram-v2
     HalfOpen --> Open : Failed Call
 ```
 
-## Reusable Client Stub
+## Reusable Client Stub & QoS-Aware Routing
 
-A reusable service client stub is provided in [sofia_client_stub.erl](file:///home/pradeeban/SOFIA/src/core/sofia_client_stub.erl). Developers can use or extend this client stub to invoke SOFIA services with built-in circuit breaker protection.
+A reusable service client stub is provided in [sofia_client_stub.erl](file:///c:/Users/pkathiravelu/SOFIA/src/core/sofia_client_stub.erl). Developers can use or extend this client stub to invoke SOFIA services with built-in QoS routing and circuit breaker protection:
+
+```erlang
+%% Invoking a service using the client stub
+{ok, Reply} = sofia_client_stub:call_service(calculator, {add, 10, 20}).
+```
+
+### Under the Hood: QoS Selection & Circuit Protection
+When `sofia_client_stub:call_service/2` is invoked:
+1. It queries `sofia_router:route/3` to discover active service instances.
+2. `sofia_router` evaluates and ranks candidate processes lexicographically by circuit breaker state, mailbox depth, and historical span latency.
+3. If the selected process's mailbox exceeds `max_mailbox_size`, backpressure sheds the request with `{error, overloaded}`.
+4. Otherwise, the invocation is executed through `sofia_breaker:call/3`, shielding the caller from cascading failures.
 
 ## Code Example: client_example.erl
 

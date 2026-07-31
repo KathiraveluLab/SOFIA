@@ -8,7 +8,7 @@ SOFIA is a lightweight, Erlang-based framework designed for building scalable, f
 - **Stateful Circuit Breaker (`sofia_breaker`)**: Low-latency, Erlang Term Storage (ETS)-backed circuit breaker protecting distributed service calls from cascading failures.
 - **Federated Configuration Sync (`sofia_config`)**: Decoupled, replicated configuration settings synchronized across nodes via lightweight cluster RPCs.
 - **Protocol Gateway (`sofia_gateway`)**: Dynamic protocol bridging translating external sensor/web requests (e.g. JSON maps) into native message tuples.
-- **Content-Based Router (`sofia_router`)**: Dynamic routing of service requests to specific target Pids based on payload criteria.
+- **QoS-Aware & Content-Based Router (`sofia_router`)**: Dynamic, sidecar-less routing that ranks candidate service endpoints lexicographically by stateful circuit breaker states (`sofia_breaker`), process mailbox queue depths, and historical invocation latencies recorded in Mnesia telemetry spans (`sofia_tracer`), while supporting caller-defined content-based routing rules.
 - **Data Transformer (`sofia_transformer`)**: Schema mapping and normalization of message parameters directly in client context.
 - **Saga Orchestrator (`sofia_saga`)**: Fault-tolerant distributed transaction coordinator executing rollbacks in reverse order on failure.
 - **Zero Bloat**: No centralized broker, no complex workflow orchestration engines, and no SOAP/XML overhead.

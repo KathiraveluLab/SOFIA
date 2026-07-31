@@ -93,3 +93,39 @@ receive
         io:format("Chain failed at ~p: ~p~n", [Service, Reason])
 end.
 ```
+
+---
+
+## 3. QoS-Aware Adaptive Routing (`sofia_router`)
+
+In federated swarm deployments, service endpoints may exhibit heterogeneous performance due to varying network conditions or node loads. SOFIA provides **QoS-aware adaptive routing** via [sofia_router.erl](file:///c:/Users/pkathiravelu/SOFIA/src/core/sofia_router.erl) to dynamically select the healthiest instance without requiring external sidecar proxies (like Envoy or Istio).
+
+### QoS Multi-Dimensional Metric Ranking
+
+Before evaluating any caller-supplied routing function $R$, `sofia_router` pre-filters and sorts candidate `Pids` using a multi-dimensional metric tuple:
+
+$$\text{QoSKey}(Pid) = (\text{BreakerState}(Pid), \text{MailboxLen}(Pid), \text{AvgLatency}(Pid))$$
+
+1. **Stateful Circuit Breaker (`BreakerState`)**: Endpoints on nodes with `open` circuit breakers are discarded immediately. Remaining instances are assigned priorities (`closed = 1 < half_open = 2`).
+2. **Process Mailbox Depth (`MailboxLen`)**: Candidate processes with mailbox queue lengths exceeding `max_mailbox_size` (default `100`) are shed with `{error, overloaded}`. Remaining endpoints are ordered by ascending message queue length.
+3. **Historical Telemetry Latency (`AvgLatency`)**: Average execution duration (in microseconds) calculated directly from completed tracing spans stored in Mnesia by `sofia_tracer`.
+
+### Code Example: Content & QoS Routing
+
+```erlang
+%% Define a routing selection function (e.g. choose first healthy endpoint)
+RouteFun = fun(_Payload, QoSSortedPids) -> 
+    {ok, hd(QoSSortedPids)} 
+end,
+
+%% Route request through sofia_router
+case sofia_router:route(payment_processor, #{method => <<"stripe">>}, RouteFun) of
+    {ok, SelectedPid} ->
+        gen_server:call(SelectedPid, process_payment);
+    {error, overloaded} ->
+        io:format("All service mailboxes are congested!~n");
+    {error, no_service_available} ->
+        io:format("No healthy payment service instances found.~n")
+end.
+```
+

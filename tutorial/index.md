@@ -8,7 +8,7 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
    Learn how to build a standard Erlang service and register it with SOFIA's decentralized registry.
    
 2. **[Chapter 2: Invoking Services with Circuit Breaker Protection](02_invoking_services_with_circuit_breaker.md)**
-   Understand how to discover active services and shield your invocations against failures using client-side circuit breakers.
+   Understand how to discover active services, leverage client stub QoS endpoint selection, and shield invocations against failures using client-side circuit breakers.
 
 3. **[Chapter 3: Distributed Configuration and Swarms](03_distributed_configuration_and_swarms.md)**
    Set up local multi-node clusters (swarms), connect nodes, and observe configuration synchronization in real-time.
@@ -17,7 +17,7 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
    Explore out-of-the-box implementations for brokerless Publish-Subscribe (Pub-Sub), Push-Pull Pipelines, and Scatter-Gather.
 
 5. **[Chapter 5: Advanced Federation Patterns](05_advanced_federation_patterns.md)**
-   Understand service-level multitenancy isolation with fallback routing, and decentralized service function chaining (SFC).
+   Understand service-level multitenancy isolation, decentralized service function chaining (SFC), and sidecar-less QoS-aware adaptive routing (`sofia_router`).
 
 6. **[Chapter 6: Hypergraph Service Workflows](06_hypergraph_service_workflows.md)**
    Define, parse, and execute service workflows in the form of directed hypergraphs using YAML notation.
@@ -32,6 +32,6 @@ Welcome to the SOFIA step-by-step tutorial series. This documentation is structu
    Implement process supervision, state-recovery timers, and compensating sagas inside SFC and Hypergraph Workflows.
 
 10. **[Chapter 10: Distributed Observability and Tracing](10_distributed_observability_and_tracing.md)**
-    Monitor execution latency and reconstruct call trees using distributed traces and spans.
+    Monitor execution latency, reconstruct call trees using distributed traces, and leverage the automated telemetry-driven routing feedback loop.
 
 

@@ -94,4 +94,35 @@ main(_) ->
     io:format("Serialized Span Footprint: ~p bytes~n", [ByteSize]),
     io:format("Heap Memory Allocation:    ~p bytes (~p words)~n", [HeapBytes, Words]).
 ```
+
+---
+
+## 6. Telemetry-Driven Routing Feedback Loop
+
+A key architectural benefit of SOFIA's built-in tracing store (`sofia_tracer`) is establishing an automated **feedback loop between observability and routing**. 
+
+Rather than treating tracing purely as a post-hoc debugging aid, `sofia_router:get_average_latency/2` queries Mnesia tracing spans in real time:
+
+```erlang
+get_average_latency(ServiceType, Node) ->
+    F = fun() ->
+        Pattern = #span{name = ServiceType, node = Node, _ = '_'},
+        mnesia:match_object(Pattern)
+    end,
+    case mnesia:transaction(F) of
+        {atomic, Spans} ->
+            Durations = [D || #span{duration = D} <- Spans, D =/= undefined],
+            case Durations of
+                [] -> 0;
+                _ -> lists:sum(Durations) div length(Durations)
+            end;
+        _ -> 0
+    end.
 ```
+
+### How Telemetry Influences Routing Decisions:
+1. Every completed service span logs its `duration` in microseconds to Mnesia.
+2. When `sofia_router` receives a request, it calculates the historical average latency for candidate service nodes.
+3. Node endpoints with higher historical latencies are ranked lower in the candidate pool.
+4. Requests are automatically directed to faster, less degraded nodes with zero sidecar proxy overhead.
+

@@ -65,6 +65,7 @@ run() ->
     {error, circuit_open} = sofia_breaker:call(water_breaker, FailingFun, #{max_failures => 3}),
 
     %% Clean up
+    ok = sofia_breaker:reset(water_breaker),
     ok = sofia_registry:deregister_service(water_service, Pid),
     Pid ! stop,
     ok.

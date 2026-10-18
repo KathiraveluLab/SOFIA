@@ -81,10 +81,13 @@ init([]) ->
             {"/api/v1/service/:service_name",   sofia_http_handler, []}
         ]}
     ]),
-    {ok, _} = cowboy:start_clear(sofia_http_listener,
+    case cowboy:start_clear(sofia_http_listener,
         [{port, Port}],
         #{env => #{dispatch => Dispatch}}
-    ),
+    ) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
     {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
@@ -97,7 +100,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    ok = cowboy:stop_listener(sofia_http_listener),
+    catch cowboy:stop_listener(sofia_http_listener),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

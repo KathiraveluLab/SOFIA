@@ -51,7 +51,13 @@ discover(ServiceType) ->
     end.
 
 discover_all(ServiceType) ->
-    pg:get_members(?SCOPE, ServiceType).
+    [P || P <- pg:get_members(?SCOPE, ServiceType), is_alive_pid(P)].
+
+is_alive_pid(Pid) ->
+    case node(Pid) =:= node() of
+        true -> is_process_alive(Pid);
+        false -> lists:member(node(Pid), nodes())
+    end.
 
 discover_by_metadata(ServiceType, QueryMetadata) ->
     F = fun() ->

@@ -85,30 +85,30 @@ $ rebar3 shell
 ```
 
 ### 2. Master Reproducibility Suite (`run_reproducibility_suite.sh`)
-Executes unit tests, single-node micro-benchmarks, 2-node clustered benchmarks, and compiles the IEEE TSC manuscript:
+Executes unit tests, single-node micro-benchmarks, use case composite pipelines, and 2-node clustered benchmarks:
 ```bash
 ./usecases/run_reproducibility_suite.sh
 ```
 
-### 2. Convenience Makefile (`Makefile`)
+### 3. Convenience Makefile (`Makefile`)
 Provides granular targets for running specific verification tasks:
 ```bash
 cd usecases
-make check    # Runs full test, benchmark, cluster, and paper compilation suite
+make check    # Runs full test, benchmark, usecases, and clustered deployment verification
 make test     # Runs EUnit unit test suite
 make bench    # Runs subsystem micro-benchmarks
+make usecases # Runs 5 standardized domain use cases and pipeline benchmarks
 make cluster  # Runs 2-node clustered deployment benchmark
-make paper    # Compiles IEEE TSC manuscript PDF
 ```
 
-### 3. SOTA Bare-Metal Benchmarks
+### 4. SOTA Bare-Metal Benchmarks
 To execute bare-metal SOTA comparisons against Redis and Consul:
 ```bash
 ./usecases/run_sota_benchmarks.sh
 ```
 This script automatically starts the local Redis and Consul servers on the host, runs the Erlang benchmark suite, collects latency metrics, and stops all background SOTA processes cleanly upon completion.
 
-### 4. Docker-based Benchmarks (For Convenience Only)
+### 5. Docker-based Benchmarks (For Convenience Only)
 If you prefer not to compile Redis or download Consul binaries directly on your host machine, you can run the SOTA services inside Docker containers using:
 ```bash
 ./usecases/run_sota_benchmarks_docker.sh
